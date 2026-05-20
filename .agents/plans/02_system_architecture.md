@@ -1,8 +1,8 @@
 # System Architecture
 
-## Recommended Repo Structure
+## Current Repo Structure
 
-Start simple, but keep boundaries clean.
+Keep boundaries clean.
 
 ```txt
 apps/
@@ -20,7 +20,7 @@ packages/
   plans/               # planning docs
 ```
 
-Keep `apps/web`, `apps/server`, and `apps/mcp` separate from the start.
+Keep `apps/web`, `apps/server`, and `apps/mcp` separate.
 
 `apps/web` owns the Next.js UI. `apps/server` owns the HTTP API. `apps/mcp` owns MCP transports and tool/resource registration.
 
@@ -64,7 +64,7 @@ Suggested choices:
 - React for the web UI.
 - Next.js for the web app.
 - App Router for UI routes and server components.
-- Hono, Fastify, or Express for local HTTP.
+- Hono for local HTTP.
 - Official MCP TypeScript SDK for the MCP server.
 - SQLite with a typed repository layer.
 - Qdrant client for semantic search.
@@ -114,6 +114,20 @@ Keep the implementation boring. Avoid framework overlap between the web app, HTT
 - Local auth if needed.
 - UI data shaping.
 
+Implemented endpoints include:
+
+- `GET /health`
+- `GET /api/runtime`
+- `GET /api/pages`
+- `POST /api/pages`
+- `GET /api/pages/:id`
+- `PATCH /api/pages/:id`
+- `GET /api/search`
+- `GET /api/graph`
+- `POST /api/notes`
+- `POST /api/links`
+- `GET /api/proposals`
+
 `apps/mcp` owns:
 
 - MCP resource registration.
@@ -121,18 +135,35 @@ Keep the implementation boring. Avoid framework overlap between the web app, HTT
 - MCP prompt registration.
 - Client capability and transport setup.
 
+Implemented stdio tools:
+
+- `wiki_search`
+- `wiki_get_page`
+- `wiki_graph_query`
+- `wiki_add_note`
+- `wiki_append_page`
+- `wiki_link_pages`
+- `wiki_runtime`
+
 ## Data Ownership
 
 SQLite is durable. Qdrant is derived.
 
 Agents may run database operations and migrations only against local/dev databases. Never run them against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
 
-Local data should live outside tracked source, for example:
+Runtime data should live outside tracked source under `~/.personal-wiki`:
 
 ```txt
-.local/personal-wiki.sqlite
-.local/qdrant/
-.local/uploads/
+~/.personal-wiki/
+  personal-wiki.sqlite
+  config.json
+  resources/
+  uploads/
+  qdrant/
+  logs/
+  backups/
 ```
 
-All local data paths should be ignored by Git.
+All local runtime data paths should be ignored by Git.
+
+The repo should contain source code, tests, design references, and plans only. It should not contain private resources or mutable runtime state.

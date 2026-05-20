@@ -1,0 +1,8 @@
+node_modules
+.next
+.agents/design/persona-wiki
+dist
+build
+coverage
+.local
+pnpm-lock.yaml

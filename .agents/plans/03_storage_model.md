@@ -4,13 +4,48 @@
 
 SQLite stores durable state.
 
-Suggested database file:
+Database file:
 
 ```txt
-.local/personal-wiki.sqlite
+~/.personal-wiki/personal-wiki.sqlite
 ```
 
 Keep it out of Git.
+
+## Runtime Home
+
+All runtime state belongs under `~/.personal-wiki`.
+
+```txt
+~/.personal-wiki/
+  personal-wiki.sqlite      # SQLite source of truth
+  config.json               # local app, MCP, and indexing config
+  resources/                # normalized resource files and extracted text
+  uploads/                  # raw user uploads before ingest
+  qdrant/                   # local Qdrant storage if running embedded/container volume
+  logs/                     # app and MCP audit logs if file logging is enabled
+  backups/                  # local SQLite/resource backups
+```
+
+Default config:
+
+```json
+{
+  "databasePath": "~/.personal-wiki/personal-wiki.sqlite",
+  "resourcesDir": "~/.personal-wiki/resources",
+  "uploadsDir": "~/.personal-wiki/uploads",
+  "qdrantStorageDir": "~/.personal-wiki/qdrant",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  }
+}
+```
+
+The code now creates this directory through `packages/wiki-core` runtime helpers. `packages/wiki-db` uses `~/.personal-wiki/personal-wiki.sqlite` as the default database path.
+
+Agents may create this directory and run migrations against this local database.
 
 ## Core Tables
 
@@ -138,6 +173,12 @@ text-embedding-3-small
 Use this first because it is cheaper and good enough for personal wiki chunk search. OpenAI docs list the default vector length as 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
 
 Keep the embedding model in config. Do not bake it into table names.
+
+If Qdrant runs locally, store its persistent volume under:
+
+```txt
+~/.personal-wiki/qdrant/
+```
 
 Suggested collection:
 

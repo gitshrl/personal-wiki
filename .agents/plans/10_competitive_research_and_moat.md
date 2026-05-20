@@ -10,18 +10,18 @@ Memory is one use case of the wiki. The main product is the wiki itself: pages, 
 
 ## Closest Tools
 
-| Tool | What It Does Well | Gap For This Project |
-| --- | --- | --- |
-| Basic Memory | MCP read/write over Markdown notes, SQLite index, semantic graph, local/cloud option | Memory/wiki substrate; no custom Next.js compounding wiki UI like persona-wiki |
-| Lithos | Local privacy-first multi-agent MCP memory, Markdown on disk, hybrid search, task coordination | Strong agent coordination; less focused on a polished personal wiki surface |
-| Engram | MCP knowledge base, Markdown + YAML source of truth, FTS backends, typed relations, multiple transports | Knowledge server first; no custom page UI, proposal review, or SQLite page model |
-| Cognee | Persistent AI memory, knowledge graph platform, MCP tools, shared/local modes | More platform/memory framework than personal wiki product |
-| OpenMemory / Mem0 | MCP memory for coding agents, auto-capture, searchable typed memories | Memory layer, not a full personal wiki with pages and reading surface |
-| Zep / Graphiti | Temporal knowledge graph memory, local MCP server, hybrid semantic/keyword/graph retrieval | Strong graph memory, but heavier than needed and not a personal wiki page product |
-| Khoj | Open-source personal AI over PDFs, Markdown, plaintext, org-mode, Notion; web/desktop/Obsidian access | Retrieval assistant over documents, not an agent-maintained compounding wiki |
-| Reor | Local AI PKM app, Markdown editor, local models, vector DB, semantic related notes | Strong local PKM, but no MCP write workflow as the main agent memory interface |
-| GNO | Local knowledge workspace, hybrid search, web UI, graph, agent integrations | Closest on workspace/search; still more document workspace than agent-maintained wiki pages |
-| Obsidian MCP tools | Vault editing, semantic/full-text search, wikilink graph, note CRUD | Tied to Obsidian/Markdown vaults; this project owns the UI and SQLite model |
+| Tool               | What It Does Well                                                                                       | Gap For This Project                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Basic Memory       | MCP read/write over Markdown notes, SQLite index, semantic graph, local/cloud option                    | Memory/wiki substrate; no custom Next.js compounding wiki UI like persona-wiki              |
+| Lithos             | Local privacy-first multi-agent MCP memory, Markdown on disk, hybrid search, task coordination          | Strong agent coordination; less focused on a polished personal wiki surface                 |
+| Engram             | MCP knowledge base, Markdown + YAML source of truth, FTS backends, typed relations, multiple transports | Knowledge server first; no custom page UI, proposal review, or SQLite page model            |
+| Cognee             | Persistent AI memory, knowledge graph platform, MCP tools, shared/local modes                           | More platform/memory framework than personal wiki product                                   |
+| OpenMemory / Mem0  | MCP memory for coding agents, auto-capture, searchable typed memories                                   | Memory layer, not a full personal wiki with pages and reading surface                       |
+| Zep / Graphiti     | Temporal knowledge graph memory, local MCP server, hybrid semantic/keyword/graph retrieval              | Strong graph memory, but heavier than needed and not a personal wiki page product           |
+| Khoj               | Open-source personal AI over PDFs, Markdown, plaintext, org-mode, Notion; web/desktop/Obsidian access   | Retrieval assistant over documents, not an agent-maintained compounding wiki                |
+| Reor               | Local AI PKM app, Markdown editor, local models, vector DB, semantic related notes                      | Strong local PKM, but no MCP write workflow as the main agent memory interface              |
+| GNO                | Local knowledge workspace, hybrid search, web UI, graph, agent integrations                             | Closest on workspace/search; still more document workspace than agent-maintained wiki pages |
+| Obsidian MCP tools | Vault editing, semantic/full-text search, wikilink graph, note CRUD                                     | Tied to Obsidian/Markdown vaults; this project owns the UI and SQLite model                 |
 
 ## Category Pattern
 
@@ -91,6 +91,8 @@ JSON remains available for graph queries and structured tool responses.
 SQLite makes the product inspectable, local, and durable.
 
 Qdrant and any future graph index must be rebuildable. This keeps the system from becoming an opaque memory service.
+
+All local runtime state should live under `~/.personal-wiki`, including SQLite, resources, uploads, Qdrant storage, logs, and backups. The repository stays portable and source-only.
 
 ### 6. Quality Gate Through Proposals
 

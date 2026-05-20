@@ -48,7 +48,22 @@ SQLite is the durable source of truth.
 
 Qdrant is a derived semantic index for RAG. It should be rebuildable from SQLite.
 
-Do not commit local databases, Qdrant snapshots, secrets, raw credentials, or private captures.
+All runtime data lives under `~/.personal-wiki`.
+
+Use this layout:
+
+```txt
+~/.personal-wiki/
+  personal-wiki.sqlite
+  config.json
+  resources/
+  uploads/
+  qdrant/
+  logs/
+  backups/
+```
+
+Do not commit local databases, Qdrant snapshots, resources, uploads, logs, secrets, raw credentials, or private captures.
 
 Agents may run database operations and migrations only against local/dev databases. Never run them against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
 
@@ -102,3 +117,37 @@ Competitive research and moat plan:
 `.agents/plans/10_competitive_research_and_moat.md`
 
 Keep future plans specific, dated, and tied to implementation phases.
+
+## Current Implementation
+
+Workspace commands:
+
+```txt
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm dev
+pnpm dev:server
+pnpm dev:mcp
+```
+
+Implemented packages:
+
+- `apps/web`: Next.js UI shell from the persona-wiki design.
+- `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, and runtime info.
+- `apps/mcp`: local stdio MCP server.
+- `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.
+- `packages/wiki-db`: SQLite migrations, repositories, FTS5, revisions, proposals.
+- `packages/wiki-index`: chunking and `text-embedding-3-small` config.
+- `packages/wiki-agent`: add-note proposal and direct note helpers.
+
+Implemented MCP tools:
+
+- `wiki_search`
+- `wiki_get_page`
+- `wiki_graph_query`
+- `wiki_add_note`
+- `wiki_append_page`
+- `wiki_link_pages`
+- `wiki_runtime`

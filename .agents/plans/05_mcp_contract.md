@@ -132,6 +132,20 @@ Default policy:
 
 Write tools must create audit log entries. Direct writes must also create page revisions.
 
+Current stdio implementation:
+
+```txt
+wiki_search
+wiki_get_page
+wiki_graph_query
+wiki_add_note
+wiki_append_page
+wiki_link_pages
+wiki_runtime
+```
+
+`wiki_get_page` returns Markdown by default. `wiki_add_note`, `wiki_append_page`, and `wiki_link_pages` default to proposal mode. `mode: "direct"` is available for local trusted use and writes to SQLite.
+
 ## Example: `wiki_rag_query`
 
 Input:

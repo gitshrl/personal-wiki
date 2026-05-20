@@ -1,0 +1,25 @@
+{
+  "name": "@personal-wiki/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "check": "pnpm typecheck && pnpm test",
+    "dev": "next dev",
+    "lint": "next lint",
+    "test": "vitest run --root ../.. apps/web --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@personal-wiki/wiki-core": "workspace:*",
+    "next": "^14.2.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.2",
+    "@types/react-dom": "^18.3.0",
+    "vitest": "^1.6.0"
+  }
+}

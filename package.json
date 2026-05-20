@@ -1,0 +1,25 @@
+{
+  "name": "personal-wiki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm typecheck && pnpm test",
+    "dev": "pnpm --filter @personal-wiki/web dev",
+    "dev:server": "pnpm --filter @personal-wiki/server dev",
+    "dev:mcp": "pnpm --filter @personal-wiki/mcp dev",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  },
+  "packageManager": "pnpm@9.12.1"
+}

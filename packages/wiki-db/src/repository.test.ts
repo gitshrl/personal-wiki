@@ -1,0 +1,190 @@
+import { describe, expect, it } from "vitest";
+import { createWikiRepository, openWikiDatabase } from "./index";
+import type { WikiDatabase } from "./index";
+
+const now = "2026-05-20T00:00:00.000Z";
+
+describe("WikiRepository", () => {
+  it("opens an in-memory database, migrates schema, and stores pages", () => {
+    withRepository(({ db, repo }) => {
+      const page = repo.createPage(
+        {
+          kind: "topic",
+          title: "MCP",
+          body: "Model Context Protocol notes.",
+          summary: "Agent protocol.",
+          metadata: { tags: ["agent-memory"] }
+        },
+        { now, changedBy: "agent-test" }
+      );
+
+      expect(
+        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pages'").get()
+      ).toBeTruthy();
+      expect(repo.getPage(page.id)).toMatchObject({
+        id: page.id,
+        title: "MCP",
+        metadata: { tags: ["agent-memory"] }
+      });
+      expect(repo.listPageRevisions(page.id)).toHaveLength(1);
+      expect(repo.searchPages("Protocol").map((result) => result.id)).toEqual([page.id]);
+    });
+  });
+
+  it("replaces derived wikilinks on page save and keeps manual links", () => {
+    withRepository(({ repo }) => {
+      const mcp = repo.createPage({ kind: "topic", title: "MCP" }, { now });
+      const wiki = repo.createPage({ kind: "topic", title: "Personal wiki" }, { now });
+      const note = repo.createPage(
+        {
+          kind: "article",
+          title: "Session note",
+          body: "Connect [[MCP]] and [[Personal wiki]]."
+        },
+        { now }
+      );
+
+      const manualLink = repo.addLink({
+        fromPageId: note.id,
+        toPageId: mcp.id,
+        origin: "manual",
+        createdAt: now
+      });
+
+      repo.updatePage(
+        note.id,
+        { body: "Keep only [[Personal wiki]]." },
+        { now: "2026-05-20T00:01:00.000Z" }
+      );
+
+      const links = repo.listLinks({ fromPageId: note.id });
+
+      expect(links).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: manualLink.id,
+            toPageId: mcp.id,
+            origin: "manual"
+          }),
+          expect.objectContaining({
+            toPageId: wiki.id,
+            origin: "wikilink",
+            sourceText: "[[Personal wiki]]"
+          })
+        ])
+      );
+      expect(links).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            toPageId: mcp.id,
+            origin: "wikilink"
+          })
+        ])
+      );
+    });
+  });
+
+  it("resolves wikilinks through aliases", () => {
+    withRepository(({ repo }) => {
+      const memory = repo.createPage({ kind: "topic", title: "Agent memory" }, { now });
+      repo.addAlias({ pageId: memory.id, alias: "AI memory" });
+
+      const note = repo.createPage(
+        {
+          kind: "article",
+          title: "Alias note",
+          body: "Remember [[AI memory]]."
+        },
+        { now }
+      );
+
+      expect(repo.listLinks({ fromPageId: note.id })).toEqual([
+        expect.objectContaining({
+          toPageId: memory.id,
+          origin: "wikilink",
+          sourceText: "[[AI memory]]"
+        })
+      ]);
+    });
+  });
+
+  it("reads backlinks, outgoing pages, neighborhoods, paths, and missing links", () => {
+    withRepository(({ repo }) => {
+      const mcp = repo.createPage({ kind: "topic", title: "MCP" }, { now });
+      const wiki = repo.createPage({ kind: "topic", title: "Personal wiki" }, { now });
+      const memory = repo.createPage({ kind: "topic", title: "Agent memory" }, { now });
+      const note = repo.createPage({ kind: "article", title: "Note" }, { now });
+      const orphan = repo.createPage({ kind: "article", title: "Orphan" }, { now });
+
+      repo.addLink({ fromPageId: note.id, toPageId: mcp.id, origin: "manual", createdAt: now });
+      repo.addLink({ fromPageId: mcp.id, toPageId: wiki.id, origin: "manual", createdAt: now });
+      repo.addLink({ fromPageId: wiki.id, toPageId: memory.id, origin: "manual", createdAt: now });
+      repo.updatePage(note.id, { body: "[[Missing page]]" }, { now });
+
+      expect(repo.getBacklinks(mcp.id).map((page) => page.id)).toEqual([note.id]);
+      expect(repo.getOutgoing(mcp.id).map((page) => page.id)).toEqual([wiki.id]);
+      expect(
+        repo
+          .getPageNeighborhood(mcp.id, { depth: 1 })
+          ?.pages.map((page) => page.id)
+          .sort()
+      ).toEqual([mcp.id, note.id, wiki.id].sort());
+      expect(repo.findPaths(note.id, memory.id, { maxDepth: 3 })).toEqual([
+        [note.id, mcp.id, wiki.id, memory.id]
+      ]);
+      expect(repo.listOrphanPages("article").map((page) => page.id)).toEqual([orphan.id]);
+      expect(repo.findMissingLinks()).toEqual([
+        expect.objectContaining({
+          pageId: note.id,
+          target: "Missing page"
+        })
+      ]);
+    });
+  });
+
+  it("stores proposal basics and explicit revisions", () => {
+    withRepository(({ repo }) => {
+      const page = repo.createPage({ kind: "topic", title: "MCP" }, { now });
+      const proposal = repo.createProposal({
+        title: "Add MCP note",
+        proposedByAgentId: "agent-test",
+        payload: { changes: [{ pageId: page.id }] },
+        createdAt: now
+      });
+
+      repo.updateProposalStatus(proposal.id, "accepted", {
+        appliedAt: "2026-05-20T00:02:00.000Z"
+      });
+      repo.addPageRevision({
+        pageId: page.id,
+        title: "MCP",
+        body: "Updated body",
+        changedBy: "agent-test",
+        changeReason: "manual test",
+        createdAt: "2026-05-20T00:03:00.000Z"
+      });
+
+      expect(repo.getProposal(proposal.id)).toMatchObject({
+        status: "accepted",
+        appliedAt: "2026-05-20T00:02:00.000Z",
+        payload: { changes: [{ pageId: page.id }] }
+      });
+      expect(repo.listPageRevisions(page.id).map((revision) => revision.body)).toContain(
+        "Updated body"
+      );
+    });
+  });
+});
+
+function withRepository(
+  run: (context: { db: WikiDatabase; repo: ReturnType<typeof createWikiRepository> }) => void
+): void {
+  const db = openWikiDatabase({ path: ":memory:" });
+  const repo = createWikiRepository(db);
+
+  try {
+    run({ db, repo });
+  } finally {
+    db.close();
+  }
+}

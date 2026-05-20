@@ -1,7 +1,7 @@
 # Personal Wiki MCP Plan Index
 
 Date: 2026-05-20  
-Status: planning only  
+Status: implementation started  
 Language: English  
 Design source: `.agents/design/persona-wiki`
 
@@ -37,6 +37,30 @@ Build these as the main product path:
 6. MCP write/add-note tools with proposal-first safety.
 7. SQLite FTS5 search.
 
+## Current Implementation Snapshot
+
+Implemented workspace packages:
+
+- `apps/web`: Next.js UI shell based on `.agents/design/persona-wiki`.
+- `apps/server`: local Hono HTTP API for pages, search, graph, notes, links, proposals, runtime info.
+- `apps/mcp`: stdio MCP server with page resources and wiki tools.
+- `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.
+- `packages/wiki-db`: SQLite schema, migrations, repository, FTS5 search.
+- `packages/wiki-index`: chunking, content hashes, embedding config.
+- `packages/wiki-agent`: add-note proposal and page helpers.
+
+Implemented commands:
+
+```txt
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm dev
+pnpm dev:server
+pnpm dev:mcp
+```
+
 Outside current scope:
 
 - Unreviewed direct writes for untrusted agents.
@@ -52,6 +76,7 @@ Outside current scope:
 - SQLite is the durable source of truth.
 - Qdrant is a rebuildable derived index.
 - Initial embedding model is `text-embedding-3-small`.
+- Runtime data lives under `~/.personal-wiki`.
 - Edges stay plain in the core graph.
 - Graph queries stay light first: SQLite links and recursive CTEs.
 - Agent-facing memory reads return Markdown by default.

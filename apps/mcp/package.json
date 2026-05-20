@@ -1,0 +1,25 @@
+{
+  "name": "@personal-wiki/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "check": "pnpm typecheck && pnpm test",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. apps/mcp/src --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@personal-wiki/wiki-agent": "workspace:*",
+    "@personal-wiki/wiki-core": "workspace:*",
+    "@personal-wiki/wiki-db": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.10.5",
+    "vitest": "^1.6.0"
+  }
+}
