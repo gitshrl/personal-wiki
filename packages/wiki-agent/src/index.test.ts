@@ -12,12 +12,13 @@ describe("wiki-agent", () => {
 
     expect(proposal.changes[0]).toMatchObject({
       op: "create_page",
+      kind: "note",
       pageTitle: "MCP write path",
       targetPages: ["Personal wiki"]
     });
   });
 
-  it("turns add note input into an article page", () => {
+  it("turns add note input into a note page", () => {
     const page = noteInputToPage(
       {
         title: "MCP write path",
@@ -28,7 +29,7 @@ describe("wiki-agent", () => {
     );
 
     expect(page).toMatchObject({
-      kind: "article",
+      kind: "note",
       sourceType: "note",
       createdByAgentId: "agent-codex"
     });

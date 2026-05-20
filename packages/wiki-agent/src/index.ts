@@ -1,11 +1,11 @@
-import { createPage, type PageKind } from "@personal-wiki/wiki-core";
+import { createPage, normalizePageKind, type PageKind } from "@personal-wiki/wiki-core";
 
 export type WriteMode = "propose" | "direct";
 
 export interface AddNoteInput {
   title: string;
   body: string;
-  kind?: Extract<PageKind, "article" | "topic"> | undefined;
+  kind?: PageKind | undefined;
   agentId: string;
   sourceSessionId?: string | undefined;
   targetPages?: string[] | undefined;
@@ -15,6 +15,7 @@ export interface AddNoteInput {
 
 export interface ProposalChange {
   op: "create_page" | "append_page" | "add_link";
+  kind?: PageKind | undefined;
   pageTitle?: string | undefined;
   pageId?: string | undefined;
   body?: string | undefined;
@@ -37,6 +38,7 @@ export function buildAddNoteProposal(input: AddNoteInput): WikiProposalPayload {
     changes: [
       {
         op: "create_page",
+        kind: normalized.kind,
         pageTitle: normalized.title,
         body: normalized.body,
         targetPages: normalized.targetPages
@@ -75,11 +77,11 @@ export function normalizeAddNoteInput(input: AddNoteInput): Required<AddNoteInpu
   return {
     title,
     body,
-    kind: input.kind ?? "article",
+    kind: normalizePageKind(input.kind ?? "note"),
     agentId,
     sourceSessionId: input.sourceSessionId ?? "",
-    targetPages: input.targetPages ?? [],
-    tags: input.tags ?? [],
+    targetPages: input.targetPages?.map((targetPage) => targetPage.trim()).filter(Boolean) ?? [],
+    tags: input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [],
     mode: input.mode ?? "propose"
   };
 }

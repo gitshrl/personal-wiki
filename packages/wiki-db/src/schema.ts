@@ -11,7 +11,7 @@ export const wikiMigrations: WikiMigration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS pages (
         id text PRIMARY KEY,
-        kind text NOT NULL CHECK (kind IN ('topic', 'article', 'person', 'agent', 'org')),
+        kind text NOT NULL,
         title text NOT NULL,
         slug text NOT NULL UNIQUE,
         body text NOT NULL DEFAULT '',
@@ -158,6 +158,104 @@ export const wikiMigrations: WikiMigration[] = [
         content='pages',
         content_rowid='rowid'
       );
+
+      CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
+        INSERT INTO pages_fts(rowid, title, summary, body)
+        VALUES (new.rowid, new.title, coalesce(new.summary, ''), new.body);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
+        INSERT INTO pages_fts(pages_fts, rowid, title, summary, body)
+        VALUES ('delete', old.rowid, old.title, coalesce(old.summary, ''), old.body);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE OF title, summary, body ON pages BEGIN
+        INSERT INTO pages_fts(pages_fts, rowid, title, summary, body)
+        VALUES ('delete', old.rowid, old.title, coalesce(old.summary, ''), old.body);
+        INSERT INTO pages_fts(rowid, title, summary, body)
+        VALUES (new.rowid, new.title, coalesce(new.summary, ''), new.body);
+      END;
+    `
+  },
+  {
+    version: 2,
+    name: "dynamic_page_kinds",
+    sql: `
+      DROP TRIGGER IF EXISTS pages_ai;
+      DROP TRIGGER IF EXISTS pages_ad;
+      DROP TRIGGER IF EXISTS pages_au;
+      DROP TABLE IF EXISTS pages_fts;
+
+      CREATE TABLE IF NOT EXISTS pages_new (
+        id text PRIMARY KEY,
+        kind text NOT NULL,
+        title text NOT NULL,
+        slug text NOT NULL UNIQUE,
+        body text NOT NULL DEFAULT '',
+        summary text,
+        status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'draft')),
+        source_url text,
+        source_type text,
+        trust text,
+        created_by_agent_id text,
+        created_at text NOT NULL,
+        updated_at text NOT NULL,
+        archived_at text,
+        metadata_json text NOT NULL DEFAULT '{}'
+      );
+
+      INSERT INTO pages_new (
+        id,
+        kind,
+        title,
+        slug,
+        body,
+        summary,
+        status,
+        source_url,
+        source_type,
+        trust,
+        created_by_agent_id,
+        created_at,
+        updated_at,
+        archived_at,
+        metadata_json
+      )
+      SELECT
+        id,
+        kind,
+        title,
+        slug,
+        body,
+        summary,
+        status,
+        source_url,
+        source_type,
+        trust,
+        created_by_agent_id,
+        created_at,
+        updated_at,
+        archived_at,
+        metadata_json
+      FROM pages;
+
+      DROP TABLE pages;
+      ALTER TABLE pages_new RENAME TO pages;
+
+      CREATE INDEX IF NOT EXISTS idx_pages_kind_status ON pages(kind, status);
+      CREATE INDEX IF NOT EXISTS idx_pages_updated_at ON pages(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_pages_title ON pages(title);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+        title,
+        summary,
+        body,
+        content='pages',
+        content_rowid='rowid'
+      );
+
+      INSERT INTO pages_fts(rowid, title, summary, body)
+      SELECT rowid, title, coalesce(summary, ''), body FROM pages;
 
       CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
         INSERT INTO pages_fts(rowid, title, summary, body)

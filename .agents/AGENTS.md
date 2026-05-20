@@ -18,15 +18,20 @@ Initial complement plan: https://gist.github.com/gitshrl/31efda23ceef34802b79614
 
 Every entity is a page.
 
-Use five entity kinds:
+Page kinds are user and domain defined.
 
-- `Topic`: concept pages, such as `Markets`, `Portfolio`, `MCP`, or `Books`.
-- `Article`: source material, notes, decisions, filings, chats, papers, gists, or tweets.
-- `Person`: authors or people, such as `Karpathy`, `Buffett`, or `Kahneman`.
-- `Agent`: creators of notes, such as `Claude`, `Codex`, or `Loka`.
-- `Org`: organizations, such as `OpenAI`, `Anthropic`, `Berkshire`, or `BCA`.
+Examples:
 
-Avoid adding new entity kinds until real usage proves they are needed.
+- `topic`
+- `note`
+- `chat`
+- `source`
+- `person`
+- `agent`
+- `company`
+- `project`
+
+Do not hardcode entity groups in UI, graph, MCP, or storage. The sidebar and graph legend should grow from the `kind` values already stored in SQLite.
 
 ## Graph Rules
 
@@ -65,7 +70,7 @@ Use this layout:
 
 Do not commit local databases, Qdrant snapshots, resources, uploads, logs, secrets, raw credentials, or private captures.
 
-Agents may run database operations and migrations only against local/dev databases. Never run them against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
+Agents may run database operations and migrations against local/dev databases. Tests may use in-memory databases. Never run database operations against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
 
 ## MCP Direction
 
@@ -75,7 +80,7 @@ Expose the wiki through MCP using:
 - Tools for search, graph query, RAG query, capture, add note, append page, link pages, and proposed or trusted writes.
 - Prompts for memory sourcing, session summaries, source ingestion, and graph audits.
 
-Start with local stdio MCP. Add Streamable HTTP only after auth and Origin validation are in place.
+Start with stdio MCP. Add Streamable HTTP only after auth and Origin validation are in place.
 
 MCP is not read-only. It is the agent memory bus for both sourcing memory and adding memory.
 
@@ -91,8 +96,8 @@ Build the real UI with Next.js.
 
 Important UI surfaces:
 
-- Home with recent articles and active topics.
-- Sidebar with pinned pages and grouped entities.
+- Home with recent pages and linked pages.
+- Sidebar with recent pages and data-driven groups.
 - Entity page with title, metadata, body, backlinks, and outgoing links.
 - Graph view with pan, zoom, node focus, and click-to-open.
 - Search or ask box for direct navigation and memory queries.
@@ -134,12 +139,12 @@ pnpm dev:mcp
 
 Implemented packages:
 
-- `apps/web`: Next.js UI shell from the persona-wiki design.
+- `apps/web`: Next.js 16 UI shell from the persona-wiki design.
 - `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, and runtime info.
-- `apps/mcp`: local stdio MCP server.
+- `apps/mcp`: stdio MCP server.
 - `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.
 - `packages/wiki-db`: SQLite migrations, repositories, FTS5, revisions, proposals.
-- `packages/wiki-index`: chunking and `text-embedding-3-small` config.
+- `packages/wiki-index`: chunking and `text-embedding-3-small` config. OpenAI and Qdrant calls are planned, not implemented.
 - `packages/wiki-agent`: add-note proposal and direct note helpers.
 
 Implemented MCP tools:

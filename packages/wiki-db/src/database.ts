@@ -74,14 +74,23 @@ export function migrateWikiDatabase(db: WikiDatabase, now = new Date().toISOStri
 
   const appliedRows = db.prepare("SELECT version FROM schema_migrations").all() as MigrationRow[];
   const appliedVersions = new Set(appliedRows.map((row) => row.version));
-  const applyMigration = db.transaction((version: number, name: string, sql: string) => {
-    db.exec(sql);
-    db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
-      version,
-      name,
-      now
-    );
-  });
+  const applyMigration = (version: number, name: string, sql: string) => {
+    const apply = db.transaction(() => {
+      db.exec(sql);
+      db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        version,
+        name,
+        now
+      );
+    });
+
+    db.pragma("foreign_keys = OFF");
+    try {
+      apply();
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
+  };
 
   for (const migration of wikiMigrations) {
     if (appliedVersions.has(migration.version)) continue;

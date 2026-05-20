@@ -4,7 +4,7 @@
 
 Use `.agents/design/persona-wiki` as the source design.
 
-The real UI will use Next.js.
+The real UI uses Next.js 16 and React 19.
 
 The mock already includes:
 
@@ -17,26 +17,38 @@ The mock already includes:
 - Wikilink rendering.
 - Backlinks and outgoing links.
 
-## Port Plan
+## Current Implementation
 
-1. Create a Next.js app in `apps/web`.
-2. Move the mock into App Router pages and components.
-3. Replace global `window.LOKA_DATA` with API calls.
-4. Call `apps/server` for API data.
-5. Keep the current views first.
-6. Keep the current visual language.
-7. Remove or hide the tweak panel if it is only a design artifact.
-8. Add proposal review and capture inbox when backend endpoints exist.
+Implemented now:
+
+- `apps/web` is a Next.js App Router app.
+- It removed app-level mock data.
+- It calls `apps/server` over HTTP JSON for pages and graph data.
+- Home, sidebar, entity page, search, Markdown-ish wikilinks, and graph view exist.
+- Empty and offline states avoid raw fetch errors.
+- Sidebar groups and graph legend derive from stored page kinds.
+- The graph action uses the design glyph icon.
+
+Still planned:
+
+- Ask box.
+- Back and forward navigation.
+- Proposal review.
+- Capture inbox.
+- Index status.
+- Agent sessions.
+- Duplicate and missing-link review.
 
 ## Required Screens
 
 Required screens:
 
-- Home.
-- Sidebar entity tree.
-- Entity page.
-- Graph.
-- Search and ask.
+- Home. Implemented.
+- Sidebar entity tree. Implemented with dynamic page kinds.
+- Entity page. Implemented.
+- Graph. Implemented with hand-rolled SVG layout.
+- Search. Implemented.
+- Ask. Planned.
 - Proposal review.
 - Capture inbox.
 
@@ -54,21 +66,30 @@ The web app should use HTTP JSON through `apps/server`. UI components should not
 
 Keep database access in `apps/server` and shared packages. Do not put SQLite calls in Next.js client components.
 
-Suggested endpoints:
+Implemented endpoints:
 
 ```txt
 GET    /api/pages
 GET    /api/pages/:id
+GET    /api/pages/:id/markdown
 POST   /api/pages
 PATCH  /api/pages/:id
 GET    /api/pages/:id/backlinks
 GET    /api/pages/:id/outgoing
 GET    /api/search?q=
-POST   /api/ask
 GET    /api/graph?focus=&depth=
+POST   /api/links
+GET    /api/proposals
+POST   /api/proposals/:id/status
+POST   /api/notes
+```
+
+Planned endpoints:
+
+```txt
+POST   /api/ask
 GET    /api/captures
 POST   /api/captures
-GET    /api/proposals
 GET    /api/proposals/:id
 POST   /api/proposals/:id/accept
 POST   /api/proposals/:id/reject

@@ -5,6 +5,7 @@ import {
   createLinkId,
   createPage as createCorePage,
   normalizeTitle,
+  normalizePageKind,
   parseWikilinks,
   replaceWikilinkLinks,
   shortHash,
@@ -313,7 +314,7 @@ export class WikiRepository {
 
     if (options.kind) {
       conditions.push("kind = @kind");
-      params.kind = options.kind;
+      params.kind = normalizePageKind(options.kind);
     }
 
     if (options.status) {
@@ -653,7 +654,7 @@ export class WikiRepository {
       .all({ pageId, depth, limit }) as IdRow[];
 
     const pageIds = rows.map((row) => row.id);
-    const allowedKinds = new Set(options.kinds ?? []);
+    const allowedKinds = new Set((options.kinds ?? []).map((kind) => normalizePageKind(kind)));
     const pages =
       allowedKinds.size === 0
         ? this.getPagesByIds(pageIds)
@@ -715,7 +716,7 @@ export class WikiRepository {
 
     if (kind) {
       sql += " AND p.kind = @kind";
-      params.kind = kind;
+      params.kind = normalizePageKind(kind);
     }
 
     sql += " ORDER BY p.title ASC";
@@ -1075,6 +1076,7 @@ function normalizePageForSave(page: WikiPage): WikiPage {
 
   return {
     ...page,
+    kind: normalizePageKind(page.kind),
     title,
     slug: page.slug || slugify(title),
     body: page.body ?? "",

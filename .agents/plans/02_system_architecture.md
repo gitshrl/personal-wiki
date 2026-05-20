@@ -7,8 +7,8 @@ Keep boundaries clean.
 ```txt
 apps/
   web/                 # Next.js UI from persona-wiki design
-  server/              # HTTP API and local app server
-  mcp/                 # MCP stdio and Streamable HTTP transports
+  server/              # HTTP API
+  mcp/                 # MCP stdio server
 packages/
   wiki-core/           # page model, wikilink parser, graph services
   wiki-db/             # SQLite repositories and SQL files
@@ -30,7 +30,7 @@ Keep `apps/web`, `apps/server`, and `apps/mcp` separate.
 MCP clients
   Claude / Codex / custom agents
         |
-        | stdio local transport, Streamable HTTP protected transport
+        | stdio transport
         v
 apps/mcp
         |
@@ -39,7 +39,7 @@ packages/wiki-core
         |
         +--> packages/wiki-db --> SQLite
         |
-        +--> packages/wiki-index --> Qdrant
+        +--> packages/wiki-index --> chunks now, Qdrant later
         |
         +--> proposal service
 
@@ -61,14 +61,14 @@ Use TypeScript unless there is a strong reason not to.
 
 Suggested choices:
 
-- React for the web UI.
-- Next.js for the web app.
+- React 19 for the web UI.
+- Next.js 16 for the web app.
 - App Router for UI routes and server components.
 - Hono for local HTTP.
 - Official MCP TypeScript SDK for the MCP server.
 - SQLite with a typed repository layer.
-- Qdrant client for semantic search.
-- `text-embedding-3-small` as the initial embedding model.
+- Qdrant client for future semantic search.
+- `text-embedding-3-small` as the initial planned embedding model.
 - A small internal package for chunking and index jobs.
 
 Keep the implementation boring. Avoid framework overlap between the web app, HTTP API, and MCP server.
@@ -93,11 +93,15 @@ Keep the implementation boring. Avoid framework overlap between the web app, HTT
 - FTS5 queries.
 - Revision reads and writes.
 
-`wiki-index` owns:
+`wiki-index` currently owns:
 
 - Chunk creation.
 - Content hashing.
-- Embedding provider abstraction, starting with OpenAI `text-embedding-3-small`.
+- Embedding metadata, starting with OpenAI `text-embedding-3-small`.
+
+`wiki-index` should later own:
+
+- Embedding provider calls.
 - Qdrant upsert/delete.
 - Rebuild logic.
 
@@ -121,19 +125,24 @@ Implemented endpoints include:
 - `GET /api/pages`
 - `POST /api/pages`
 - `GET /api/pages/:id`
+- `GET /api/pages/:id/markdown`
 - `PATCH /api/pages/:id`
+- `GET /api/pages/:id/backlinks`
+- `GET /api/pages/:id/outgoing`
 - `GET /api/search`
 - `GET /api/graph`
-- `POST /api/notes`
 - `POST /api/links`
+- `POST /api/notes`
 - `GET /api/proposals`
+- `POST /api/proposals/:id/status`
 
-`apps/mcp` owns:
+`apps/mcp` currently owns:
 
 - MCP resource registration.
 - MCP tool registration.
-- MCP prompt registration.
 - Client capability and transport setup.
+
+MCP prompt registration is planned, not implemented yet.
 
 Implemented stdio tools:
 
@@ -147,9 +156,9 @@ Implemented stdio tools:
 
 ## Data Ownership
 
-SQLite is durable. Qdrant is derived.
+SQLite is durable. Qdrant is derived and not implemented yet.
 
-Agents may run database operations and migrations only against local/dev databases. Never run them against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
+Contributor agents should not run manual database operations or migrations unless the owner asks. Test suites may use in-memory SQLite. Never run database operations against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
 
 Runtime data should live outside tracked source under `~/.personal-wiki`:
 

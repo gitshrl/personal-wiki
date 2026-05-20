@@ -62,7 +62,15 @@ SQLite stays the source of truth even if a graph engine is added. Any graph engi
 
 ## Search Layers
 
-Use three layers:
+Current implementation:
+
+- `wiki_search` uses SQLite FTS5 when a query exists.
+- Empty search returns recent pages from SQLite.
+- Page reads return Markdown by default through MCP.
+- Graph reads use SQLite links and recursive traversal.
+- Qdrant, semantic search, and RAG are not implemented yet.
+
+Target search stack:
 
 1. Title and alias search from SQLite.
 2. Keyword search from SQLite FTS5.
@@ -70,9 +78,13 @@ Use three layers:
 
 This gives useful behavior before full RAG is tuned.
 
-Use `text-embedding-3-small` for the first semantic index. Keep the provider configurable so the index can be rebuilt with another model.
+Use `text-embedding-3-small` for the first semantic index. Keep the provider configurable so the index can be rebuilt with another model. OpenAI's embeddings docs list `text-embedding-3-small` as 1536 dimensions by default and `text-embedding-3-large` as 3072 dimensions by default.
+
+If no `OPENAI_API_KEY` is configured, semantic indexing should stay disabled and the product should continue with SQLite title, alias, and FTS search.
 
 ## RAG Pipeline
+
+`wiki_rag_query` is planned. It is not implemented in the MCP server yet.
 
 For `wiki_rag_query`:
 

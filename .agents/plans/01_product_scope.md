@@ -41,7 +41,7 @@ The moat is the compounding wiki loop:
 agent reads memory
 -> agent does useful work
 -> agent writes a clean note
--> note becomes a styled Article page
+-> note becomes a styled wiki page
 -> wikilinks update backlinks
 -> graph neighborhoods improve
 -> future agents retrieve better context
@@ -70,19 +70,29 @@ Important files:
 - `views-home.jsx`: home view.
 - `styles.css`: visual system.
 
-The mock includes legacy kinds like `repo`, `lab`, `claim`, `source`, and `brainstorm`. The real product should use the five core kinds below.
+The mock includes sample kinds like `repo`, `lab`, `claim`, `source`, and `brainstorm`. The real product should not hardcode a fixed kind list.
 
 ## Entity Kinds
 
-Use five entity kinds:
+Page kinds are user and domain defined.
 
-- `Topic`: concept pages, such as `Markets`, `Portfolio`, `MCP`, or `Books`.
-- `Article`: source material, notes, decisions, filings, chats, papers, gists, or tweets.
-- `Person`: authors and individuals.
-- `Agent`: Claude, Codex, Loka, or other creators of notes.
-- `Org`: organizations and affiliations.
+Examples:
 
-Avoid adding more kinds until real usage proves the need.
+- `topic`
+- `note`
+- `chat`
+- `source`
+- `person`
+- `agent`
+- `company`
+- `project`
+
+Rules:
+
+- Store kinds as normalized slugs.
+- Let the sidebar and graph legend derive groups from stored pages.
+- Do not require schema changes for new kinds.
+- Avoid fake empty groups when the database has no pages.
 
 ## Principles
 
@@ -101,15 +111,15 @@ Avoid adding more kinds until real usage proves the need.
 5. Preserve provenance.
    Every page edit should know who made it, when, and from which source or session.
 
-6. Local first.
-   Use stdio MCP and localhost HTTP first. Add remote MCP only after auth and Origin validation are solid.
+6. Local/dev first for writes.
+   Use stdio MCP and localhost HTTP first. Add remote MCP only after auth and Origin validation are solid. Agents may run DB operations on local/dev databases, but remote/shared targets need explicit approval.
 
 ## Core User Flows
 
 ### Source Memory During Chat
 
 1. User chats with Claude, Codex, or another MCP client.
-2. Agent calls `wiki_search` or `wiki_rag_query`.
+2. Agent calls `wiki_search` now. Later it can call `wiki_rag_query` when semantic search exists.
 3. Agent reads selected pages through `wiki://page/{id}` resources as Markdown.
 4. Agent cites the wiki pages in its answer.
 5. No write happens unless the user asks or the session ends with useful memory.

@@ -51,14 +51,35 @@ describe("wiki MCP tool actions", () => {
         mode: "direct"
       });
 
-      expect(result.page?.id).toBe("article-direct-note");
+      expect(result.page?.id).toBe("note-direct-note");
       expect(result.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
-      const graph = queryWikiGraph(context, { focusPageId: "article-direct-note" });
+      const graph = queryWikiGraph(context, { focusPageId: "note-direct-note" });
       expect(graph.pages.map((page) => page.id)).toContain("topic-personal-wiki");
 
       const search = searchWiki(context, { q: "Direct" });
-      expect(search.pages.map((page) => page.id)).toContain("article-direct-note");
+      expect(search.pages.map((page) => page.id)).toContain("note-direct-note");
+    } finally {
+      close();
+    }
+  });
+
+  it("accepts custom note kinds", () => {
+    const { context, close } = createContext();
+
+    try {
+      const result = addWikiNote(context, {
+        title: "Agent chat",
+        body: "A chat can be its own kind.",
+        agentId: "codex",
+        kind: "chat",
+        mode: "direct"
+      });
+
+      expect(result.page).toMatchObject({
+        id: "chat-agent-chat",
+        kind: "chat"
+      });
     } finally {
       close();
     }

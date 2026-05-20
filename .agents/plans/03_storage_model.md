@@ -45,7 +45,7 @@ Default config:
 
 The code now creates this directory through `packages/wiki-core` runtime helpers. `packages/wiki-db` uses `~/.personal-wiki/personal-wiki.sqlite` as the default database path.
 
-Agents may create this directory and run migrations against this local database.
+The app and MCP server can create this directory at startup. Contributor agents should not run manual database operations or migrations unless the owner asks.
 
 ## Core Tables
 
@@ -153,6 +153,9 @@ mcp_audit_log
 
 ## Notes
 
+- `pages.kind` is a normalized, user/domain-defined slug.
+- Do not enforce a fixed kind enum in SQLite.
+- New domains can add kinds such as `chat`, `trade`, `paper`, `company`, or `project` without migrations.
 - `links.origin` starts with `wikilink`, `manual`, `proposal`, or `system`.
 - Keep links semantically plain in the core graph.
 - If relation types are needed, add them after real usage proves it.
@@ -162,7 +165,15 @@ mcp_audit_log
 
 ## Qdrant
 
-Qdrant stores derived semantic search points.
+Qdrant will store derived semantic search points.
+
+Current implementation status:
+
+- `packages/wiki-index` chunks pages and records embedding metadata.
+- It does not call OpenAI yet.
+- It does not write to Qdrant yet.
+- There is no RAG endpoint yet.
+- The app works without `OPENAI_API_KEY`.
 
 Initial embedding model:
 
@@ -170,9 +181,11 @@ Initial embedding model:
 text-embedding-3-small
 ```
 
-Use this first because it is cheaper and good enough for personal wiki chunk search. OpenAI docs list the default vector length as 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`.
+Use this first because it is cheaper and good enough for personal wiki chunk search. OpenAI's embeddings docs list the default vector length as 1536 for `text-embedding-3-small` and 3072 for `text-embedding-3-large`. The same docs list an 8192 max input for both `text-embedding-3-small` and `text-embedding-3-large`.
 
-Keep the embedding model in config. Do not bake it into table names.
+Keep the embedding model in config. Do not bake it into table names or collection names.
+
+Indexing needs an API key only when semantic search is implemented and enabled. Read `OPENAI_API_KEY` from the environment or from local config under `~/.personal-wiki/config.json`. Never store it in the repo.
 
 If Qdrant runs locally, store its persistent volume under:
 

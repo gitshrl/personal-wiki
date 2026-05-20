@@ -151,7 +151,7 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
       inputSchema: {
         title: z.string().min(1),
         body: z.string().min(1),
-        kind: z.enum(["article", "topic"]).optional(),
+        kind: z.string().min(1).optional(),
         agentId: z.string().min(1),
         sourceSessionId: z.string().optional(),
         targetPages: z.array(z.string().min(1)).optional(),

@@ -1,6 +1,4 @@
-export const pageKinds = ["topic", "article", "person", "agent", "org"] as const;
-
-export type PageKind = (typeof pageKinds)[number];
+export type PageKind = string;
 
 export type PageStatus = "active" | "archived" | "draft";
 

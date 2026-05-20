@@ -22,24 +22,24 @@ Recommended defaults:
 - Loka: `propose_only`, maybe `trusted_write` for maintenance after review
 - Unknown clients: `read_only`
 
-Direct writes should still create `page_revisions` and `mcp_audit_log` rows.
+Direct writes currently create page revisions. `mcp_audit_log` is in the schema plan, but tool-call logging is not implemented yet.
 
 ## Add Note Flow
 
 Use this when a chat produces a durable insight, decision, task, or useful synthesis.
 
-1. Agent calls `wiki_add_note` or `wiki_append_note`.
+1. Agent calls `wiki_add_note` or `wiki_append_page`.
 2. Server resolves target pages and wikilinks.
 3. Trusted low-risk writes can apply directly.
 4. Other writes create a proposal.
-5. Accepted notes update backlinks, outgoing links, revisions, and index jobs.
+5. Accepted notes update backlinks, outgoing links, and revisions. Index jobs are planned for the semantic index.
 
 Good notes are short. They preserve the takeaway, not the whole transcript.
 
 ## Memory Sourcing During Chat
 
 1. Agent receives a user question.
-2. Agent calls `wiki_rag_query` with a focused query.
+2. Agent calls `wiki_search` with a focused query. Later it can call `wiki_rag_query`.
 3. Server returns compact candidate pages.
 4. Agent reads only the needed `wiki://page/{id}` resources.
 5. Agent answers using the selected memory.
@@ -65,7 +65,7 @@ Good behavior:
 Proposal changes should be small:
 
 - Append a decision.
-- Create a short article note.
+- Create a short note page.
 - Update a topic summary.
 - Add links between pages.
 - Add a task or open question when it came from a decision.
@@ -78,10 +78,10 @@ Do not ingest everything into one article.
 
 Preferred output:
 
-- One `Article` page for the source.
-- Updates to existing `Topic` pages.
-- New `Topic` pages only when needed.
-- Links to `Person`, `Agent`, and `Org`.
+- One source page.
+- Updates to existing pages.
+- New page kinds only when the domain needs them.
+- Links to relevant people, agents, organizations, projects, or user-defined kinds.
 - One proposal that groups all changes.
 
 Ingest prompt should ask the agent to:
@@ -102,8 +102,8 @@ Nightly or manual jobs:
 - Detect duplicate titles and aliases.
 - Detect stale pages by `updated_at`.
 - Detect pages with no backlinks and no outgoing links.
-- Re-index changed chunks.
-- Check Qdrant point count against SQLite chunk count.
+- Re-index changed chunks when Qdrant is implemented.
+- Check Qdrant point count against SQLite chunk count when Qdrant is implemented.
 
 Maintenance jobs should create proposals or review items. They should not silently rewrite the wiki.
 

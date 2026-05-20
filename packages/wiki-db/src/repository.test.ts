@@ -31,6 +31,26 @@ describe("WikiRepository", () => {
     });
   });
 
+  it("stores custom page kinds without schema changes", () => {
+    withRepository(({ repo }) => {
+      const chat = repo.createPage(
+        {
+          kind: "chat-session",
+          title: "Design chat",
+          body: "A durable chat note."
+        },
+        { now }
+      );
+
+      expect(chat).toMatchObject({
+        id: "chat-session-design-chat",
+        kind: "chat-session"
+      });
+      expect(repo.listPages({ kind: "chat-session" }).map((page) => page.id)).toEqual([chat.id]);
+      expect(repo.listPages({ kind: "chat session" }).map((page) => page.id)).toEqual([chat.id]);
+    });
+  });
+
   it("replaces derived wikilinks on page save and keeps manual links", () => {
     withRepository(({ repo }) => {
       const mcp = repo.createPage({ kind: "topic", title: "MCP" }, { now });

@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import type { PageKind } from "./types";
-
 export function normalizeTitle(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -13,9 +11,10 @@ export function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function createPageId(kind: PageKind, title: string): string {
+export function createPageId(kind: string, title: string): string {
+  const pageKind = normalizePageKind(kind);
   const slug = slugify(title);
-  return `${kind}-${slug || shortHash(title)}`;
+  return `${pageKind}-${slug || shortHash(title)}`;
 }
 
 export function createLinkId(fromPageId: string, toPageId: string, sourceText: string): string {
@@ -28,4 +27,8 @@ export function createAliasId(pageId: string, alias: string): string {
 
 export function shortHash(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+export function normalizePageKind(value: string): string {
+  return slugify(value) || "page";
 }

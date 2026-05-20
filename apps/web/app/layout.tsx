@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Personal wiki",
-  description: "A local wiki shell for personal knowledge."
+  description: "A wiki workspace for personal knowledge."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

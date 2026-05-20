@@ -1,10 +1,11 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { z } from "zod";
 import {
   getPersonalWikiRuntimePaths,
   ensurePersonalWikiRuntimeHome,
   normalizeTitle,
-  pageKinds,
+  normalizePageKind,
   renderPageMarkdown,
   slugify,
   type PersonalWikiRuntimePaths,
@@ -23,7 +24,11 @@ export interface CreateServerAppOptions {
   runtimePaths?: PersonalWikiRuntimePaths;
 }
 
-const pageKindSchema = z.enum(pageKinds);
+const pageKindSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((value) => normalizePageKind(value));
 const pageStatusSchema = z.enum(["active", "archived", "draft"]);
 const proposalStatusValueSchema = z.enum(["pending", "accepted", "rejected", "applied"]);
 const writeModeSchema = z.enum(["propose", "direct"]);
@@ -66,7 +71,7 @@ const updatePageSchema = z
 const noteSchema = z.object({
   title: z.string().trim().min(1),
   body: z.string().trim().min(1),
-  kind: z.enum(["article", "topic"]).optional(),
+  kind: pageKindSchema.optional(),
   agentId: z.string().trim().min(1),
   sourceSessionId: z.string().optional(),
   targetPages: z.array(z.string().trim().min(1)).optional(),
@@ -98,6 +103,15 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
     options.repo ??
     createWikiRepository(openWikiDatabase({ path: runtimePaths.databasePath, migrate: true }));
   const app = new Hono();
+
+  app.use(
+    "*",
+    cors({
+      origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+      allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+      allowHeaders: ["content-type"]
+    })
+  );
 
   app.onError((error, c) => {
     const status = error instanceof ApiError ? error.status : 500;

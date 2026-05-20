@@ -1,17 +1,48 @@
 "use client";
 
-import type { KeyboardEvent, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+  WheelEvent
+} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  buildEntries,
-  pinnedEntries,
-  wikiData,
-  type EntityKind,
-  type GraphEdge,
-  type WikiData,
-  type WikiEntry
-} from "./mock-data";
+type EntityKind = string;
+
+type WikiPage = {
+  id: string;
+  kind: EntityKind;
+  title: string;
+  slug: string;
+  body: string;
+  summary?: string;
+  status: string;
+  sourceUrl?: string;
+  sourceType?: string;
+  trust?: string;
+  createdByAgentId?: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+  metadata: Record<string, unknown>;
+};
+
+type WikiLink = {
+  id: string;
+  fromPageId: string;
+  toPageId: string;
+  origin: string;
+  sourceText?: string;
+  createdByAgentId?: string;
+  createdAt: string;
+};
+
+type PageGraph = {
+  pages: WikiPage[];
+  links: WikiLink[];
+};
 
 type ViewState = { mode: "home" } | { mode: "graph" } | { mode: "entry"; id: string };
 
@@ -22,68 +53,99 @@ type SearchItem = {
   hint: string;
 };
 
-const entityGroups: Array<{ kind: EntityKind; label: string }> = [
-  { kind: "article", label: "Articles" },
-  { kind: "topic", label: "Topics" },
-  { kind: "person", label: "People" },
-  { kind: "agent", label: "Agents" },
-  { kind: "org", label: "Orgs" }
-];
+const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "http://127.0.0.1:4321";
 
 export default function Home() {
-  const entries = useMemo(() => buildEntries(wikiData), []);
-  const entryById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
-  const entryByTitle = useMemo(
-    () => new Map(entries.map((entry) => [entry.title.toLowerCase(), entry])),
-    [entries]
-  );
-
+  const [pages, setPages] = useState<WikiPage[]>([]);
+  const [links, setLinks] = useState<WikiLink[]>([]);
   const [view, setView] = useState<ViewState>({ mode: "home" });
-  const [graphFocusId, setGraphFocusId] = useState("topic-personal-wiki");
+  const [graphFocusId, setGraphFocusId] = useState("");
   const [sidebarFilter, setSidebarFilter] = useState("");
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchIndex, setSearchIndex] = useState(0);
-  const [groupOpen, setGroupOpen] = useState<Record<EntityKind, boolean>>({
-    article: true,
-    topic: true,
-    person: true,
-    agent: true,
-    org: true
-  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
 
-  const activeEntry = view.mode === "entry" ? entryById.get(view.id) : undefined;
-  const visibleSearchItems = useMemo(() => filterSearchItems(entries, search), [entries, search]);
+  const pageById = useMemo(() => new Map(pages.map((page) => [page.id, page])), [pages]);
+  const pageByTitle = useMemo(
+    () => new Map(pages.map((page) => [page.title.toLowerCase(), page])),
+    [pages]
+  );
+  const connectionStatus = loading ? "" : error ? "offline" : "online";
+  const activePage = view.mode === "entry" ? pageById.get(view.id) : undefined;
+  const visibleSearchItems = useMemo(
+    () => filterSearchItems(pages, search, links.length),
+    [pages, search, links.length]
+  );
+  const sidebarGroups = useMemo(
+    () => groupPagesByKind(pages.filter((page) => matchesFilter(page, sidebarFilter))),
+    [pages, sidebarFilter]
+  );
 
-  function openEntry(id: string) {
-    const entry = entryById.get(id);
-    if (!entry) {
-      return;
+  useEffect(() => {
+    void refreshWiki();
+  }, []);
+
+  async function refreshWiki() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const [pagesResponse, graphResponse] = await Promise.all([
+        fetch(`${apiBase}/api/pages?limit=500`, { cache: "no-store" }),
+        fetch(`${apiBase}/api/graph`, { cache: "no-store" })
+      ]);
+
+      if (!pagesResponse.ok) throw new Error(`pages request failed: ${pagesResponse.status}`);
+      if (!graphResponse.ok) throw new Error(`graph request failed: ${graphResponse.status}`);
+
+      const pagesPayload = (await pagesResponse.json()) as { pages: WikiPage[] };
+      const graphPayload = (await graphResponse.json()) as PageGraph;
+      const nextPages = pagesPayload.pages;
+      const nextLinks = graphPayload.links ?? [];
+
+      setPages(nextPages);
+      setLinks(nextLinks);
+      setGraphFocusId((current) => {
+        if (current && nextPages.some((page) => page.id === current)) return current;
+        return nextPages[0]?.id ?? "";
+      });
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "failed to load wiki");
+    } finally {
+      setLoading(false);
     }
+  }
 
+  function openPage(id: string) {
+    if (!pageById.has(id)) return;
     setView({ mode: "entry", id });
     setGraphFocusId(id);
-    setSearch("");
-    setSearchOpen(false);
+    closeSearch();
   }
 
   function openHome() {
     setView({ mode: "home" });
-    setSearch("");
-    setSearchOpen(false);
+    closeSearch();
   }
 
-  function openGraph(focusId = graphFocusId) {
+  function openGraph(focusId = graphFocusId || pages[0]?.id || "") {
+    if (pages.length === 0) return;
     setGraphFocusId(focusId);
     setView({ mode: "graph" });
+    closeSearch();
+  }
+
+  function closeSearch() {
     setSearch("");
     setSearchOpen(false);
+    setSearchIndex(0);
   }
 
   function pickSearchItem(item: SearchItem | undefined) {
-    if (!item) {
-      return;
-    }
+    if (!item) return;
 
     if (item.id === "home") {
       openHome();
@@ -95,7 +157,7 @@ export default function Home() {
       return;
     }
 
-    openEntry(item.id);
+    openPage(item.id);
   }
 
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -118,12 +180,12 @@ export default function Home() {
     }
 
     if (event.key === "Escape") {
-      setSearch("");
-      setSearchOpen(false);
+      closeSearch();
     }
   }
 
-  const breadcrumb = getBreadcrumb(view, activeEntry);
+  const breadcrumb = getBreadcrumb(view, activePage);
+  const pinnedPages = pages.slice(0, 5);
 
   return (
     <div className="app-shell">
@@ -155,8 +217,8 @@ export default function Home() {
             }}
             onFocus={() => setSearchOpen(true)}
             onKeyDown={onSearchKeyDown}
-            placeholder="Search entries"
-            aria-label="Search entries"
+            placeholder="Search pages"
+            aria-label="Search pages"
           />
           {searchOpen ? (
             <div className="search__results">
@@ -170,7 +232,7 @@ export default function Home() {
                     pickSearchItem(item);
                   }}
                 >
-                  <span className={`dot dot--${item.kind}`} />
+                  <KindDot kind={item.kind} />
                   <span className="search__kind">{item.kind}</span>
                   <span className="search__title">{item.title}</span>
                   <span className="search__hint">{item.hint}</span>
@@ -183,9 +245,12 @@ export default function Home() {
         <button
           className={`topbar__button ${view.mode === "graph" ? "is-active" : ""}`}
           type="button"
+          disabled={pages.length === 0}
           onClick={() => openGraph()}
+          aria-label="Open graph"
+          title="Graph"
         >
-          graph
+          ✺
         </button>
       </header>
 
@@ -195,33 +260,35 @@ export default function Home() {
             <input
               value={sidebarFilter}
               onChange={(event) => setSidebarFilter(event.target.value)}
-              placeholder="filter notes..."
-              aria-label="Filter notes"
+              placeholder="filter pages..."
+              aria-label="Filter pages"
             />
           </div>
 
-          <nav className="tree" aria-label="Wiki entries">
-            <div className="tree__section">Pinned</div>
-            <div className="tree__group tree__group--open">
-              {pinnedEntries
-                .map((id) => entryById.get(id))
-                .filter((entry): entry is WikiEntry => Boolean(entry))
-                .map((entry) => (
-                  <TreeItem
-                    key={entry.id}
-                    entry={entry}
-                    active={activeEntry?.id === entry.id}
-                    onClick={() => openEntry(entry.id)}
-                  />
-                ))}
-            </div>
+          <nav className="tree" aria-label="Wiki pages">
+            {pinnedPages.length > 0 ? (
+              <>
+                <div className="tree__section">Recent</div>
+                <div className="tree__group tree__group--open">
+                  {pinnedPages.map((page) => (
+                    <TreeItem
+                      key={page.id}
+                      page={page}
+                      active={activePage?.id === page.id}
+                      onClick={() => openPage(page.id)}
+                    />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="tree__placeholder">
+                <span>{loading ? "loading..." : "pages appear here"}</span>
+              </div>
+            )}
 
-            <div className="tree__section">Entities</div>
-            {entityGroups.map((group) => {
-              const groupEntries = entries
-                .filter((entry) => entry.kind === group.kind)
-                .filter((entry) => matchesFilter(entry, sidebarFilter));
-
+            {sidebarGroups.length > 0 ? <div className="tree__section">Pages</div> : null}
+            {sidebarGroups.map((group) => {
+              const isOpen = groupOpen[group.kind] ?? true;
               return (
                 <div key={group.kind} className="tree__group">
                   <button
@@ -230,29 +297,25 @@ export default function Home() {
                     onClick={() =>
                       setGroupOpen((current) => ({
                         ...current,
-                        [group.kind]: !current[group.kind]
+                        [group.kind]: !(current[group.kind] ?? true)
                       }))
                     }
                   >
-                    <span className="tree__caret">{groupOpen[group.kind] ? "v" : ">"}</span>
+                    <span className="tree__caret">{isOpen ? "v" : ">"}</span>
                     <span>{group.label}</span>
-                    <span className="tree__count">{groupEntries.length}</span>
+                    <span className="tree__count">{group.pages.length}</span>
                   </button>
 
-                  {groupOpen[group.kind] ? (
+                  {isOpen ? (
                     <div>
-                      {groupEntries.length > 0 ? (
-                        groupEntries.map((entry) => (
-                          <TreeItem
-                            key={entry.id}
-                            entry={entry}
-                            active={activeEntry?.id === entry.id}
-                            onClick={() => openEntry(entry.id)}
-                          />
-                        ))
-                      ) : (
-                        <div className="tree__empty">no matches</div>
-                      )}
+                      {group.pages.map((page) => (
+                        <TreeItem
+                          key={page.id}
+                          page={page}
+                          active={activePage?.id === page.id}
+                          onClick={() => openPage(page.id)}
+                        />
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -264,32 +327,35 @@ export default function Home() {
         <main className="main">
           {view.mode === "home" ? (
             <HomeView
-              entries={entries}
-              data={wikiData}
-              openEntry={openEntry}
+              pages={pages}
+              links={links}
+              loading={loading}
+              error={error}
+              refreshWiki={refreshWiki}
+              openPage={openPage}
               openGraph={openGraph}
             />
           ) : null}
 
           {view.mode === "graph" ? (
             <GraphView
-              data={wikiData}
-              entries={entries}
-              entryById={entryById}
+              pages={pages}
+              links={links}
+              pageById={pageById}
               focusId={graphFocusId}
               setFocusId={setGraphFocusId}
-              openEntry={openEntry}
+              openPage={openPage}
             />
           ) : null}
 
-          {view.mode === "entry" && activeEntry ? (
+          {view.mode === "entry" && activePage ? (
             <EntityPage
-              data={wikiData}
-              entry={activeEntry}
-              entries={entries}
-              entryById={entryById}
-              entryByTitle={entryByTitle}
-              openEntry={openEntry}
+              page={activePage}
+              pages={pages}
+              links={links}
+              pageById={pageById}
+              pageByTitle={pageByTitle}
+              openPage={openPage}
               openGraph={openGraph}
             />
           ) : null}
@@ -297,196 +363,230 @@ export default function Home() {
       </div>
 
       <footer className="statusbar">
-        <span>{entries.length} entries</span>
-        <span>{wikiData.graph.edges.length} links</span>
-        <span className="statusbar__right">mock data only</span>
+        <span>{pages.length} pages</span>
+        <span>{links.length} links</span>
+        {connectionStatus ? (
+          <span className={`statusbar__connection statusbar__connection--${connectionStatus}`}>
+            {connectionStatus}
+          </span>
+        ) : null}
       </footer>
     </div>
   );
 }
 
 function TreeItem({
-  entry,
+  page,
   active,
   onClick
 }: {
-  entry: WikiEntry;
+  page: WikiPage;
   active: boolean;
   onClick: () => void;
 }) {
   return (
     <button className={`tree__item ${active ? "is-active" : ""}`} type="button" onClick={onClick}>
-      <span className={`dot dot--${entry.kind}`} />
-      <span>{entry.title}</span>
+      <KindDot kind={page.kind} />
+      <span>{page.title}</span>
     </button>
   );
 }
 
 function HomeView({
-  entries,
-  data,
-  openEntry,
+  pages,
+  links,
+  loading,
+  error,
+  refreshWiki,
+  openPage,
   openGraph
 }: {
-  entries: WikiEntry[];
-  data: WikiData;
-  openEntry: (id: string) => void;
+  pages: WikiPage[];
+  links: WikiLink[];
+  loading: boolean;
+  error: string;
+  refreshWiki: () => Promise<void>;
+  openPage: (id: string) => void;
   openGraph: (focusId?: string) => void;
 }) {
-  const recentEntries = entries
-    .filter((entry) => entry.addedAt)
-    .sort((left, right) => (right.addedAt ?? "").localeCompare(left.addedAt ?? ""))
-    .slice(0, 8);
-  const activeTopics = entries
-    .filter((entry) => entry.kind === "topic")
-    .sort((left, right) => (right.weight ?? 0) - (left.weight ?? 0))
-    .slice(0, 6);
+  const recentPages = pages.slice(0, 8);
+  const linkedPages = getMostLinkedPages(pages, links).slice(0, 6);
+  const updatedAt = pages[0]?.updatedAt;
+  const showEmpty = loading || error || pages.length === 0;
+  const emptyTitle = loading ? "Opening wiki" : error ? "Wiki is offline" : "Start with one page";
+  const emptyCopy = loading
+    ? "Checking the workspace."
+    : error
+      ? "Start the wiki server, then refresh this view."
+      : "Pages, notes, chats, and sources will appear here as the wiki grows.";
+  const lede =
+    pages.length > 0
+      ? `${pages.length} pages and ${links.length} graph links.`
+      : "A workspace for pages, notes, chats, and sources.";
 
   return (
     <section className="home-view">
-      <div className="home-view__date">Wednesday, 20 May 2026</div>
-      <h1>good evening, Sahrul.</h1>
-      <p className="home-view__lede">
-        {entries.length} entries in the vault across {data.topics.length} topics,{" "}
-        {data.sources.length} sources, and {data.graph.edges.length} graph links.
-      </p>
-
-      <div className="home-grid">
-        <section className="home-block">
-          <div className="section-title">
-            <h2>recent</h2>
-            <span>across all kinds</span>
-          </div>
-          <div className="row-list">
-            {recentEntries.map((entry) => (
-              <button
-                key={entry.id}
-                className="row-link"
-                type="button"
-                onClick={() => openEntry(entry.id)}
-              >
-                <span className={`dot dot--${entry.kind}`} />
-                <span>{entry.title}</span>
-                <span>{entry.addedAt}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="home-block">
-          <div className="section-title">
-            <h2>active topics</h2>
-            <span>by weight</span>
-          </div>
-          <div className="row-list">
-            {activeTopics.map((entry) => (
-              <button
-                key={entry.id}
-                className="row-link"
-                type="button"
-                onClick={() => openEntry(entry.id)}
-              >
-                <span className={`dot dot--${entry.kind}`} />
-                <span>{entry.title}</span>
-                <span>{entry.weight?.toFixed(2)}</span>
-              </button>
-            ))}
-          </div>
-        </section>
+      <div className="home-view__date">
+        {loading ? "loading" : updatedAt ? formatDateTime(updatedAt) : "wiki"}
       </div>
+      <h1>Personal wiki</h1>
+      <p className="home-view__lede">{lede}</p>
 
-      <button
-        className="graph-strip"
-        type="button"
-        onClick={() => openGraph("topic-personal-wiki")}
-      >
-        <span>open graph neighborhood</span>
-        <span>focus: Personal wiki</span>
-      </button>
+      {showEmpty ? (
+        <div className="empty-state">
+          <div className="empty-state__visual" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="empty-state__body">
+            <h2>{emptyTitle}</h2>
+            <p>{emptyCopy}</p>
+            {error ? (
+              <div className="empty-state__actions">
+                <code>pnpm dev:server</code>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {pages.length > 0 ? (
+        <>
+          <div className="home-grid">
+            <section className="home-block">
+              <div className="section-title">
+                <h2>recent</h2>
+                <button type="button" onClick={() => void refreshWiki()}>
+                  refresh
+                </button>
+              </div>
+              <div className="row-list">
+                {recentPages.map((page) => (
+                  <button
+                    key={page.id}
+                    className="row-link"
+                    type="button"
+                    onClick={() => openPage(page.id)}
+                  >
+                    <KindDot kind={page.kind} />
+                    <span>{page.title}</span>
+                    <span>{formatDate(page.updatedAt)}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="home-block">
+              <div className="section-title">
+                <h2>linked</h2>
+                <span>{linkedPages.length}</span>
+              </div>
+              <div className="row-list">
+                {linkedPages.length > 0 ? (
+                  linkedPages.map(({ page, count }) => (
+                    <button
+                      key={page.id}
+                      className="row-link"
+                      type="button"
+                      onClick={() => openPage(page.id)}
+                    >
+                      <KindDot kind={page.kind} />
+                      <span>{page.title}</span>
+                      <span>{count}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="empty-copy">Waiting for links.</p>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <button className="graph-strip" type="button" onClick={() => openGraph(pages[0]?.id)}>
+            <span>open graph</span>
+            <span>{links.length} links</span>
+          </button>
+        </>
+      ) : null}
     </section>
   );
 }
 
 function EntityPage({
-  data,
-  entry,
-  entries,
-  entryById,
-  entryByTitle,
-  openEntry,
+  page,
+  pages,
+  links,
+  pageById,
+  pageByTitle,
+  openPage,
   openGraph
 }: {
-  data: WikiData;
-  entry: WikiEntry;
-  entries: WikiEntry[];
-  entryById: Map<string, WikiEntry>;
-  entryByTitle: Map<string, WikiEntry>;
-  openEntry: (id: string) => void;
+  page: WikiPage;
+  pages: WikiPage[];
+  links: WikiLink[];
+  pageById: Map<string, WikiPage>;
+  pageByTitle: Map<string, WikiPage>;
+  openPage: (id: string) => void;
   openGraph: (focusId?: string) => void;
 }) {
-  const outgoingEntries = getOutgoingEntries(entry, data, entryById, entryByTitle);
-  const backlinkEntries = getBacklinkEntries(entry, data, entries, entryById);
-  const relatedArticles = entry.kind === "topic" ? getRelatedArticles(entry, data, entries) : [];
-  const pageTitle = entry.kind === "article" && entry.isOwn ? "note" : entry.kind;
+  const outgoingPages = getOutgoingPages(page.id, links, pageById);
+  const backlinkPages = getBacklinkPages(page.id, links, pageById);
+  const relatedPages = getRelatedPages(page.id, pages, links);
 
   return (
     <article className="entity-page">
       <header className="entity-page__header">
         <div className="entity-page__kind">
-          <span className={`dot dot--${entry.kind}`} />
+          <KindDot kind={page.kind} />
           <span>
-            {pageTitle}
-            {entry.sourceType ? ` - ${entry.sourceType}` : ""}
+            {page.kind}
+            {page.sourceType ? ` - ${page.sourceType}` : ""}
           </span>
         </div>
-        <h1>{entry.title}</h1>
-        {entry.summary ? <p className="entity-page__lede">{entry.summary}</p> : null}
-        {entry.url ? (
-          <a className="entity-page__url" href={entry.url} target="_blank" rel="noreferrer">
-            {entry.url}
+        <h1>{page.title}</h1>
+        {page.summary ? <p className="entity-page__lede">{page.summary}</p> : null}
+        {page.sourceUrl ? (
+          <a className="entity-page__url" href={page.sourceUrl} target="_blank" rel="noreferrer">
+            {page.sourceUrl}
           </a>
         ) : null}
         <MetadataRow
-          entry={entry}
-          relatedCount={relatedArticles.length}
-          linkCount={outgoingEntries.length + backlinkEntries.length}
+          page={page}
+          relatedCount={relatedPages.length}
+          linkCount={outgoingPages.length + backlinkPages.length}
         />
       </header>
 
-      {entry.body ? (
+      {page.body ? (
         <section className="entity-section entity-section--prose">
-          <WikiProse body={entry.body} entryByTitle={entryByTitle} openEntry={openEntry} />
+          <WikiProse body={page.body} pageByTitle={pageByTitle} openPage={openPage} />
         </section>
       ) : (
         <section className="entity-section">
-          <p className="empty-copy">
-            No body yet. This mock page still has metadata and graph links.
-          </p>
+          <p className="empty-copy">No body.</p>
         </section>
       )}
 
-      {relatedArticles.length > 0 ? (
+      {relatedPages.length > 0 ? (
         <section className="entity-section">
           <div className="section-title">
-            <h2>articles</h2>
-            <span>{relatedArticles.length}</span>
+            <h2>related</h2>
+            <span>{relatedPages.length}</span>
           </div>
           <div className="card-list">
-            {relatedArticles.map((article) => (
+            {relatedPages.map((relatedPage) => (
               <button
-                key={article.id}
+                key={relatedPage.id}
                 className="card-row"
                 type="button"
-                onClick={() => openEntry(article.id)}
+                onClick={() => openPage(relatedPage.id)}
               >
                 <span>
-                  <strong>{article.title}</strong>
-                  <small>
-                    {article.sourceType}
-                    {article.author ? ` - ${article.author}` : ""}
-                  </small>
+                  <strong>{relatedPage.title}</strong>
+                  <small>{relatedPage.sourceType ?? relatedPage.kind}</small>
                 </span>
-                <span>{article.addedAt}</span>
+                <span>{formatDate(relatedPage.updatedAt)}</span>
               </button>
             ))}
           </div>
@@ -496,14 +596,14 @@ function EntityPage({
       <section className="entity-section">
         <div className="section-title">
           <h2>graph</h2>
-          <button type="button" onClick={() => openGraph(entry.id)}>
+          <button type="button" onClick={() => openGraph(page.id)}>
             open neighborhood
           </button>
         </div>
         <LinkColumns
-          outgoingEntries={outgoingEntries}
-          backlinkEntries={backlinkEntries}
-          openEntry={openEntry}
+          outgoingPages={outgoingPages}
+          backlinkPages={backlinkPages}
+          openPage={openPage}
         />
       </section>
     </article>
@@ -511,40 +611,23 @@ function EntityPage({
 }
 
 function MetadataRow({
-  entry,
+  page,
   relatedCount,
   linkCount
 }: {
-  entry: WikiEntry;
+  page: WikiPage;
   relatedCount: number;
   linkCount: number;
 }) {
-  const items: Array<[string, string]> = [];
+  const items: Array<[string, string]> = [
+    ["updated", formatDate(page.updatedAt)],
+    ["status", page.status]
+  ];
 
-  if (entry.author) {
-    items.push(["by", entry.author]);
-  }
-  if (entry.addedAt) {
-    items.push(["added", entry.addedAt]);
-  }
-  if (entry.status) {
-    items.push(["status", entry.status]);
-  }
-  if (entry.weight !== undefined) {
-    items.push(["weight", entry.weight.toFixed(2)]);
-  }
-  if (entry.trust) {
-    items.push(["trust", entry.trust]);
-  }
-  if (entry.tag) {
-    items.push(["tag", `#${entry.tag}`]);
-  }
-  if (relatedCount > 0) {
-    items.push(["articles", String(relatedCount)]);
-  }
-  if (linkCount > 0) {
-    items.push(["links", String(linkCount)]);
-  }
+  if (page.trust) items.push(["trust", page.trust]);
+  if (page.createdByAgentId) items.push(["agent", page.createdByAgentId]);
+  if (relatedCount > 0) items.push(["related", String(relatedCount)]);
+  if (linkCount > 0) items.push(["links", String(linkCount)]);
 
   return (
     <dl className="metadata">
@@ -560,18 +643,18 @@ function MetadataRow({
 
 function WikiProse({
   body,
-  entryByTitle,
-  openEntry
+  pageByTitle,
+  openPage
 }: {
   body: string;
-  entryByTitle: Map<string, WikiEntry>;
-  openEntry: (id: string) => void;
+  pageByTitle: Map<string, WikiPage>;
+  openPage: (id: string) => void;
 }) {
   return (
     <div className="prose">
       {body.split(/\n\n+/).map((paragraph, index) => (
         <p key={`${paragraph.slice(0, 24)}-${index}`}>
-          {renderInline(paragraph, entryByTitle, openEntry)}
+          {renderInline(paragraph, pageByTitle, openPage)}
         </p>
       ))}
     </div>
@@ -580,8 +663,8 @@ function WikiProse({
 
 function renderInline(
   text: string,
-  entryByTitle: Map<string, WikiEntry>,
-  openEntry: (id: string) => void
+  pageByTitle: Map<string, WikiPage>,
+  openPage: (id: string) => void
 ) {
   const parts: ReactNode[] = [];
   const pattern = /\[\[([^\]]+)\]\]|\*\*([^*]+)\*\*/g;
@@ -590,7 +673,6 @@ function renderInline(
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text)) !== null) {
-    const fullMatch = match[0] ?? "";
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
@@ -599,14 +681,14 @@ function renderInline(
     const strongLabel = match[2];
 
     if (wikiLabel) {
-      const target = entryByTitle.get(wikiLabel.toLowerCase());
+      const target = pageByTitle.get(wikiLabel.toLowerCase());
       parts.push(
         target ? (
           <button
             key={`wiki-${key}`}
             className="wikilink"
             type="button"
-            onClick={() => openEntry(target.id)}
+            onClick={() => openPage(target.id)}
           >
             {wikiLabel}
           </button>
@@ -622,7 +704,7 @@ function renderInline(
       key += 1;
     }
 
-    lastIndex = match.index + fullMatch.length;
+    lastIndex = match.index + match[0].length;
   }
 
   if (lastIndex < text.length) {
@@ -633,384 +715,537 @@ function renderInline(
 }
 
 function LinkColumns({
-  outgoingEntries,
-  backlinkEntries,
-  openEntry
+  outgoingPages,
+  backlinkPages,
+  openPage
 }: {
-  outgoingEntries: WikiEntry[];
-  backlinkEntries: WikiEntry[];
-  openEntry: (id: string) => void;
+  outgoingPages: WikiPage[];
+  backlinkPages: WikiPage[];
+  openPage: (id: string) => void;
 }) {
   return (
     <div className="link-columns">
-      <LinkColumn title="outgoing" entries={outgoingEntries} openEntry={openEntry} />
-      <LinkColumn title="backlinks" entries={backlinkEntries} openEntry={openEntry} />
+      <LinkColumn title="outgoing" pages={outgoingPages} openPage={openPage} />
+      <LinkColumn title="backlinks" pages={backlinkPages} openPage={openPage} />
     </div>
   );
 }
 
 function LinkColumn({
   title,
-  entries,
-  openEntry
+  pages,
+  openPage
 }: {
   title: string;
-  entries: WikiEntry[];
-  openEntry: (id: string) => void;
+  pages: WikiPage[];
+  openPage: (id: string) => void;
 }) {
   return (
     <div className="link-column">
       <h3>
-        {title} <span>{entries.length}</span>
+        {title} <span>{pages.length}</span>
       </h3>
-      {entries.length > 0 ? (
-        entries.map((entry) => (
+      {pages.length > 0 ? (
+        pages.map((page) => (
           <button
-            key={entry.id}
+            key={page.id}
             className="link-row"
             type="button"
-            onClick={() => openEntry(entry.id)}
+            onClick={() => openPage(page.id)}
           >
-            <span className={`dot dot--${entry.kind}`} />
-            <span>{entry.title}</span>
-            <span>{entry.kind}</span>
+            <KindDot kind={page.kind} />
+            <span>{page.title}</span>
+            <span>{page.kind}</span>
           </button>
         ))
       ) : (
-        <p>none</p>
+        <p>None.</p>
       )}
     </div>
   );
 }
 
 function GraphView({
-  data,
-  entries,
-  entryById,
+  pages,
+  links,
+  pageById,
   focusId,
   setFocusId,
-  openEntry
+  openPage
 }: {
-  data: WikiData;
-  entries: WikiEntry[];
-  entryById: Map<string, WikiEntry>;
+  pages: WikiPage[];
+  links: WikiLink[];
+  pageById: Map<string, WikiPage>;
   focusId: string;
   setFocusId: (id: string) => void;
-  openEntry: (id: string) => void;
+  openPage: (id: string) => void;
 }) {
-  const focusEntry = entryById.get(focusId) ?? entries.find((entry) => entry.kind === "topic");
-  const graph = useMemo(() => {
-    if (!focusEntry) {
-      return { nodes: [], edges: [] as GraphEdge[], positions: new Map<string, Point>() };
+  const layout = useMemo(() => buildGraphLayout(pages, links), [pages, links]);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [showLegend, setShowLegend] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(
+    null
+  );
+
+  useEffect(() => {
+    function stopDrag() {
+      dragRef.current = null;
     }
 
-    const touchingEdges = data.graph.edges.filter(
-      (edge) => edge.from === focusEntry.id || edge.to === focusEntry.id
-    );
-    const neighborIds = touchingEdges.map((edge) =>
-      edge.from === focusEntry.id ? edge.to : edge.from
-    );
-    const uniqueIds = [focusEntry.id, ...Array.from(new Set(neighborIds))].slice(0, 13);
-    const nodes = uniqueIds
-      .map((id) => entryById.get(id))
-      .filter((entry): entry is WikiEntry => Boolean(entry));
-    const nodeIds = new Set(nodes.map((entry) => entry.id));
-    const edges = touchingEdges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
-    const positions = buildRadialPositions(nodes);
+    window.addEventListener("mouseup", stopDrag);
+    return () => window.removeEventListener("mouseup", stopDrag);
+  }, []);
 
-    return { nodes, edges, positions };
-  }, [data.graph.edges, entryById, focusEntry]);
+  const highlightedIds = useMemo(() => {
+    const rootId = hoverId ?? focusId;
+    const ids = new Set<string>();
+    if (!rootId) return ids;
+    ids.add(rootId);
+    for (const edge of layout.edges) {
+      const from = layout.nodes[edge.s];
+      const to = layout.nodes[edge.t];
+      if (!from || !to) continue;
+      if (from.id === rootId) ids.add(to.id);
+      if (to.id === rootId) ids.add(from.id);
+    }
+    return ids;
+  }, [focusId, hoverId, layout]);
 
-  if (!focusEntry) {
-    return <div className="graph-view">No graph focus available.</div>;
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of layout.nodes) {
+      counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((left, right) => left[0].localeCompare(right[0]));
+  }, [layout.nodes]);
+
+  function onMouseDown(event: ReactMouseEvent<SVGSVGElement>) {
+    const target = event.target as Element;
+    if (target.closest(".graph-node")) return;
+    dragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: pan.x,
+      panY: pan.y
+    };
+    event.preventDefault();
+  }
+
+  function onMouseMove(event: ReactMouseEvent<SVGSVGElement>) {
+    if (!dragRef.current) return;
+    const dx = event.clientX - dragRef.current.startX;
+    const dy = event.clientY - dragRef.current.startY;
+    setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
+  }
+
+  function onWheel(event: WheelEvent<SVGSVGElement>) {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -0.08 : 0.08;
+    setZoom((current) => Math.max(0.35, Math.min(2.5, current + delta)));
   }
 
   return (
     <section className="graph-view">
-      <div className="graph-view__header">
-        <div>
-          <div className="entity-page__kind">
-            <span className={`dot dot--${focusEntry.kind}`} />
-            graph neighborhood
-          </div>
-          <h1>{focusEntry.title}</h1>
-        </div>
-        <div className="graph-view__meta">
-          <span>{graph.nodes.length} nodes</span>
-          <span>{graph.edges.length} edges</span>
-        </div>
-      </div>
-
-      <div className="graph-canvas">
-        <svg
-          viewBox="0 0 760 420"
-          role="img"
-          aria-label={`Graph neighborhood for ${focusEntry.title}`}
-        >
-          <defs>
-            <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="1" fill="rgba(236, 231, 217, 0.12)" />
-            </pattern>
-          </defs>
-          <rect width="760" height="420" fill="url(#grid)" />
-
-          {graph.edges.map((edge) => {
-            const from = graph.positions.get(edge.from);
-            const to = graph.positions.get(edge.to);
-            if (!from || !to) {
-              return null;
-            }
-
-            return (
-              <line
-                key={`${edge.from}-${edge.to}-${edge.type}`}
-                x1={from.x}
-                y1={from.y}
-                x2={to.x}
-                y2={to.y}
-                className="graph-edge"
-              />
-            );
-          })}
-
-          {graph.nodes.map((entry) => {
-            const point = graph.positions.get(entry.id);
-            if (!point) {
-              return null;
-            }
-
-            const isFocus = entry.id === focusEntry.id;
-            const radius = isFocus ? 20 : entry.kind === "topic" ? 14 : 11;
-
-            return (
-              <g
-                key={entry.id}
-                className="graph-node"
-                transform={`translate(${point.x}, ${point.y})`}
-                onClick={() => {
-                  setFocusId(entry.id);
-                  openEntry(entry.id);
-                }}
+      <div className="graph">
+        {layout.nodes.length > 0 ? (
+          <svg
+            viewBox={`0 0 ${layout.width} ${layout.height}`}
+            preserveAspectRatio="xMidYMid meet"
+            role="img"
+            aria-label="Wiki graph"
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={() => {
+              dragRef.current = null;
+            }}
+            onWheel={onWheel}
+            style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
+          >
+            <defs>
+              <pattern
+                id="graph-dots"
+                x="0"
+                y="0"
+                width="40"
+                height="40"
+                patternUnits="userSpaceOnUse"
               >
-                <circle
-                  r={radius}
-                  className={`graph-node__circle graph-node__circle--${entry.kind}`}
-                />
-                {isFocus ? <circle r={radius + 7} className="graph-node__ring" /> : null}
-                <text x={radius + 8} y="4">
-                  {entry.title}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
+                <circle cx="0.6" cy="0.6" r="0.6" fill="rgba(120,130,140,0.14)" />
+              </pattern>
+            </defs>
+            <rect x="0" y="0" width={layout.width} height={layout.height} fill="url(#graph-dots)" />
+            <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+              {layout.edges.map((edge) => {
+                const from = layout.nodes[edge.s];
+                const to = layout.nodes[edge.t];
+                if (!from || !to) return null;
+                const isHighlighted =
+                  highlightedIds.size === 0 ||
+                  (highlightedIds.has(from.id) && highlightedIds.has(to.id));
+                return (
+                  <line
+                    key={edge.id}
+                    className="graph-edge"
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                    opacity={isHighlighted ? 1 : 0.18}
+                  />
+                );
+              })}
+              {layout.nodes.map((node) => {
+                const isHighlighted = highlightedIds.size === 0 || highlightedIds.has(node.id);
+                const isFocus = node.id === focusId;
+                return (
+                  <g
+                    key={node.id}
+                    className="graph-node"
+                    transform={`translate(${node.x},${node.y})`}
+                    onMouseEnter={() => {
+                      setHoverId(node.id);
+                      setFocusId(node.id);
+                    }}
+                    onMouseLeave={() => setHoverId(null)}
+                    onClick={() => openPage(node.id)}
+                  >
+                    {isFocus ? (
+                      <circle className="graph-node__ring" r={node.r + 6} opacity={0.85} />
+                    ) : null}
+                    <circle
+                      className="graph-node__circle"
+                      r={node.r}
+                      opacity={isHighlighted ? 0.95 : 0.22}
+                      style={kindStyle(node.kind)}
+                    />
+                    <text x={node.r + 6} y="3" opacity={isHighlighted ? 1 : 0.35}>
+                      {node.title}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+        ) : (
+          <div className="graph-empty">Graph appears after pages connect.</div>
+        )}
 
-      <div className="graph-list">
-        {graph.nodes
-          .filter((entry) => entry.id !== focusEntry.id)
-          .map((entry) => (
-            <button key={entry.id} type="button" onClick={() => setFocusId(entry.id)}>
-              <span className={`dot dot--${entry.kind}`} />
-              <span>{entry.title}</span>
-              <span>{entry.kind}</span>
-            </button>
-          ))}
+        <div className="graph__title">
+          <span>graph</span>
+          <strong>{pageById.get(focusId)?.title ?? "Personal wiki"}</strong>
+        </div>
+
+        <button
+          className="graph__legend-toggle"
+          type="button"
+          onClick={() => setShowLegend((current) => !current)}
+          title="Legend"
+        >
+          {showLegend ? "x" : "?"}
+        </button>
+
+        {showLegend ? (
+          <div className="graph__legend">
+            <div className="title">types</div>
+            {typeCounts.map(([kind, count]) => (
+              <div key={kind} className="row">
+                <span className="sw" style={kindStyle(kind)} />
+                <span className="lbl">{kind}</span>
+                <span className="ct">{count}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="graph__hud">
+          <div>
+            nodes <b>{layout.nodes.length}</b>
+          </div>
+          <div>
+            edges <b>{layout.edges.length}</b>
+          </div>
+          <div>
+            zoom <b>{zoom.toFixed(2)}x</b>
+          </div>
+          {focusId ? (
+            <div>
+              focus <b>{pageById.get(focusId)?.title ?? focusId}</b>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="graph__zoom">
+          <button type="button" onClick={() => setZoom((current) => Math.max(0.35, current - 0.1))}>
+            -
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+            }}
+          >
+            o
+          </button>
+          <button type="button" onClick={() => setZoom((current) => Math.min(2.5, current + 0.1))}>
+            +
+          </button>
+        </div>
       </div>
     </section>
   );
 }
 
-type Point = {
-  x: number;
-  y: number;
-};
-
-function buildRadialPositions(nodes: WikiEntry[]) {
-  const positions = new Map<string, Point>();
-  const center = { x: 330, y: 210 };
-  const radius = 148;
-
-  nodes.forEach((entry, index) => {
-    if (index === 0) {
-      positions.set(entry.id, center);
-      return;
-    }
-
-    const angle = ((index - 1) / Math.max(nodes.length - 1, 1)) * Math.PI * 2 - Math.PI / 2;
-    positions.set(entry.id, {
-      x: center.x + Math.cos(angle) * radius,
-      y: center.y + Math.sin(angle) * radius
-    });
-  });
-
-  return positions;
-}
-
-function getOutgoingEntries(
-  entry: WikiEntry,
-  data: WikiData,
-  entryById: Map<string, WikiEntry>,
-  entryByTitle: Map<string, WikiEntry>
-) {
-  const ids = new Set<string>();
-
-  for (const id of getWikiLinkIds(entry.body, entryByTitle)) {
-    ids.add(id);
-  }
-
-  for (const edge of data.graph.edges) {
-    if (edge.from === entry.id) {
-      ids.add(edge.to);
-    }
-  }
-
-  return resolveEntries(ids, entryById);
-}
-
-function getBacklinkEntries(
-  entry: WikiEntry,
-  data: WikiData,
-  entries: WikiEntry[],
-  entryById: Map<string, WikiEntry>
-) {
-  const ids = new Set<string>();
-  const marker = `[[${entry.title.toLowerCase()}]]`;
-
-  for (const other of entries) {
-    if (other.id === entry.id || !other.body) {
-      continue;
-    }
-
-    if (other.body.toLowerCase().includes(marker)) {
-      ids.add(other.id);
-    }
-  }
-
-  for (const edge of data.graph.edges) {
-    if (edge.to === entry.id) {
-      ids.add(edge.from);
-    }
-  }
-
-  return resolveEntries(ids, entryById);
-}
-
-function getRelatedArticles(entry: WikiEntry, data: WikiData, entries: WikiEntry[]) {
-  const articleIds = new Set<string>();
-  const topicMarker = `[[${entry.title.toLowerCase()}]]`;
-
-  for (const edge of data.graph.edges) {
-    if (edge.to === entry.id) {
-      articleIds.add(edge.from);
-    }
-    if (edge.from === entry.id) {
-      articleIds.add(edge.to);
-    }
-  }
-
-  for (const other of entries) {
-    if (other.kind === "article" && other.body?.toLowerCase().includes(topicMarker)) {
-      articleIds.add(other.id);
-    }
-  }
-
-  return entries
-    .filter((candidate) => candidate.kind === "article" && articleIds.has(candidate.id))
-    .slice(0, 10);
-}
-
-function getWikiLinkIds(body: string | undefined, entryByTitle: Map<string, WikiEntry>) {
-  const ids = new Set<string>();
-  if (!body) {
-    return ids;
-  }
-
-  const pattern = /\[\[([^\]]+)\]\]/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(body)) !== null) {
-    const label = match[1];
-    if (!label) {
-      continue;
-    }
-
-    const target = entryByTitle.get(label.toLowerCase());
-    if (target) {
-      ids.add(target.id);
-    }
-  }
-
-  return ids;
-}
-
-function resolveEntries(ids: Set<string>, entryById: Map<string, WikiEntry>) {
-  const entries: WikiEntry[] = [];
-
-  ids.forEach((id) => {
-    const entry = entryById.get(id);
-    if (entry) {
-      entries.push(entry);
-    }
-  });
-
-  return entries;
-}
-
-function filterSearchItems(entries: WikiEntry[], query: string) {
-  const baseItems: SearchItem[] = [
-    { id: "home", kind: "cmd", title: "Go to Home", hint: "" },
-    { id: "graph", kind: "cmd", title: "Open Graph", hint: "" },
-    ...entries.map((entry) => ({
-      id: entry.id,
-      kind: entry.kind,
-      title: entry.title,
-      hint: entry.author ?? entry.sourceType ?? entry.status ?? ""
-    }))
+function filterSearchItems(pages: WikiPage[], query: string, linkCount: number): SearchItem[] {
+  const normalized = query.trim().toLowerCase();
+  const commands: SearchItem[] = [
+    { id: "home", kind: "cmd", title: "Home", hint: `${pages.length} pages` }
   ];
-
-  if (!query.trim()) {
-    return baseItems.slice(0, 10);
+  if (pages.length > 0) {
+    commands.push({ id: "graph", kind: "cmd", title: "Graph", hint: `${linkCount} links` });
   }
+  const pageItems = pages.map((page) => ({
+    id: page.id,
+    kind: page.kind,
+    title: page.title,
+    hint: page.summary ?? page.status
+  }));
 
-  const lowered = query.toLowerCase();
-  return baseItems
-    .filter(
-      (item) =>
-        item.title.toLowerCase().includes(lowered) ||
-        item.kind.toLowerCase().includes(lowered) ||
-        item.hint.toLowerCase().includes(lowered)
-    )
+  if (!normalized) return [...commands, ...pageItems].slice(0, 12);
+
+  return [...commands, ...pageItems]
+    .filter((item) => `${item.title} ${item.hint} ${item.kind}`.toLowerCase().includes(normalized))
     .slice(0, 12);
 }
 
-function getBreadcrumb(view: ViewState, entry: WikiEntry | undefined) {
-  if (view.mode === "home") {
-    return ["Home"];
-  }
-
-  if (view.mode === "graph") {
-    return ["Graph"];
-  }
-
-  if (entry) {
-    return [entry.kind, entry.title];
-  }
-
-  return ["Entry"];
+function KindDot({ kind }: { kind: string }) {
+  return <span className="dot" style={kindStyle(kind)} />;
 }
 
-function matchesFilter(entry: WikiEntry, filter: string) {
-  if (!filter.trim()) {
-    return true;
+function kindStyle(kind: string): CSSProperties {
+  return { "--kind-color": colorForKind(kind) } as CSSProperties;
+}
+
+function colorForKind(kind: string): string {
+  const palette = ["#c8b574", "#86b6c8", "#f59e5b", "#d783a7", "#b89ad3", "#8fcf9f", "#d6a36f"];
+  let hash = 0;
+  for (let index = 0; index < kind.length; index += 1) {
+    hash = (hash * 31 + kind.charCodeAt(index)) >>> 0;
+  }
+  return palette[hash % palette.length] ?? "#8c8576";
+}
+
+function matchesFilter(page: WikiPage, filter: string): boolean {
+  const normalized = filter.trim().toLowerCase();
+  if (!normalized) return true;
+  return `${page.title} ${page.summary ?? ""} ${page.status} ${page.kind}`
+    .toLowerCase()
+    .includes(normalized);
+}
+
+function groupPagesByKind(pages: WikiPage[]) {
+  const groups = new Map<string, WikiPage[]>();
+  for (const page of pages) {
+    const existing = groups.get(page.kind) ?? [];
+    existing.push(page);
+    groups.set(page.kind, existing);
   }
 
-  const lowered = filter.toLowerCase();
-  return (
-    entry.title.toLowerCase().includes(lowered) ||
-    entry.kind.toLowerCase().includes(lowered) ||
-    (entry.author ?? "").toLowerCase().includes(lowered) ||
-    (entry.sourceType ?? "").toLowerCase().includes(lowered) ||
-    (entry.tag ?? "").toLowerCase().includes(lowered)
+  return [...groups.entries()]
+    .map(([kind, groupPages]) => ({
+      kind,
+      label: humanizeKind(kind),
+      pages: groupPages.sort((left, right) => left.title.localeCompare(right.title))
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function humanizeKind(kind: string): string {
+  const label = kind.replace(/[-_]+/g, " ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function getBreadcrumb(view: ViewState, activePage: WikiPage | undefined): string[] {
+  if (view.mode === "home") return ["wiki"];
+  if (view.mode === "graph") return ["wiki", "graph"];
+  return ["wiki", activePage?.kind ?? "page", activePage?.title ?? view.id];
+}
+
+function getOutgoingPages(
+  pageId: string,
+  links: WikiLink[],
+  pageById: Map<string, WikiPage>
+): WikiPage[] {
+  return uniquePages(
+    links
+      .filter((link) => link.fromPageId === pageId)
+      .map((link) => pageById.get(link.toPageId))
+      .filter((page): page is WikiPage => Boolean(page))
   );
+}
+
+function getBacklinkPages(
+  pageId: string,
+  links: WikiLink[],
+  pageById: Map<string, WikiPage>
+): WikiPage[] {
+  return uniquePages(
+    links
+      .filter((link) => link.toPageId === pageId)
+      .map((link) => pageById.get(link.fromPageId))
+      .filter((page): page is WikiPage => Boolean(page))
+  );
+}
+
+function getRelatedPages(pageId: string, pages: WikiPage[], links: WikiLink[]): WikiPage[] {
+  const pageById = new Map(pages.map((page) => [page.id, page]));
+  const ids = new Set<string>();
+  for (const link of links) {
+    if (link.fromPageId === pageId) ids.add(link.toPageId);
+    if (link.toPageId === pageId) ids.add(link.fromPageId);
+  }
+  return [...ids]
+    .map((id) => pageById.get(id))
+    .filter((page): page is WikiPage => Boolean(page))
+    .sort((left, right) => left.title.localeCompare(right.title));
+}
+
+function getMostLinkedPages(pages: WikiPage[], links: WikiLink[]) {
+  const counts = new Map<string, number>();
+  for (const link of links) {
+    counts.set(link.fromPageId, (counts.get(link.fromPageId) ?? 0) + 1);
+    counts.set(link.toPageId, (counts.get(link.toPageId) ?? 0) + 1);
+  }
+  return pages
+    .map((page) => ({ page, count: counts.get(page.id) ?? 0 }))
+    .filter((item) => item.count > 0)
+    .sort(
+      (left, right) => right.count - left.count || left.page.title.localeCompare(right.page.title)
+    );
+}
+
+function uniquePages(pages: WikiPage[]): WikiPage[] {
+  return [...new Map(pages.map((page) => [page.id, page])).values()].sort((left, right) =>
+    left.title.localeCompare(right.title)
+  );
+}
+
+function buildGraphLayout(pages: WikiPage[], links: WikiLink[]) {
+  const width = 1200;
+  const height = 760;
+  const visiblePages = pages.slice(0, 500);
+  const count = Math.max(1, visiblePages.length);
+  const nodes = visiblePages.map((page, index) => {
+    const angle = index * 2.399963229728653;
+    const spread = Math.sqrt(index + 1) / Math.sqrt(count);
+    const radius = Math.min(width, height) * 0.39 * spread;
+    return {
+      ...page,
+      x: width / 2 + Math.cos(angle) * radius,
+      y: height / 2 + Math.sin(angle) * radius,
+      vx: 0,
+      vy: 0,
+      r: sizeForPage(page, links)
+    };
+  });
+  const nodeIndex = new Map(nodes.map((node, index) => [node.id, index]));
+  const edges = links
+    .map((link) => {
+      const s = nodeIndex.get(link.fromPageId);
+      const t = nodeIndex.get(link.toPageId);
+      if (s === undefined || t === undefined) return null;
+      return { ...link, s, t };
+    })
+    .filter((edge): edge is WikiLink & { s: number; t: number } => Boolean(edge));
+
+  const iterations = Math.min(260, Math.max(120, nodes.length * 6));
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+        const left = nodes[leftIndex];
+        const right = nodes[rightIndex];
+        if (!left || !right) continue;
+        let dx = left.x - right.x;
+        let dy = left.y - right.y;
+        const distanceSquared = dx * dx + dy * dy + 0.01;
+        const distance = Math.sqrt(distanceSquared);
+        if (distance > 320) continue;
+        const force = 6200 / distanceSquared;
+        dx /= distance;
+        dy /= distance;
+        left.vx += dx * force;
+        left.vy += dy * force;
+        right.vx -= dx * force;
+        right.vy -= dy * force;
+      }
+    }
+
+    for (const edge of edges) {
+      const from = nodes[edge.s];
+      const to = nodes[edge.t];
+      if (!from || !to) continue;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const distance = Math.sqrt(dx * dx + dy * dy) + 0.01;
+      const target = 126;
+      const force = (distance - target) * 0.018;
+      const ux = dx / distance;
+      const uy = dy / distance;
+      from.vx += ux * force;
+      from.vy += uy * force;
+      to.vx -= ux * force;
+      to.vy -= uy * force;
+    }
+
+    for (const node of nodes) {
+      node.vx += (width / 2 - node.x) * 0.0013;
+      node.vy += (height / 2 - node.y) * 0.0013;
+      node.vx *= 0.78;
+      node.vy *= 0.78;
+      node.x = clamp(node.x + node.vx, 32, width - 32);
+      node.y = clamp(node.y + node.vy, 32, height - 32);
+    }
+  }
+
+  return {
+    width,
+    height,
+    nodes: nodes.map((node) => ({
+      ...node,
+      x: Math.round(node.x),
+      y: Math.round(node.y)
+    })),
+    edges
+  };
+}
+
+function sizeForPage(page: WikiPage, links: WikiLink[] = []): number {
+  const degree = links.filter(
+    (link) => link.fromPageId === page.id || link.toPageId === page.id
+  ).length;
+  return 8 + Math.min(12, degree * 2);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit" }).format(date);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
 }

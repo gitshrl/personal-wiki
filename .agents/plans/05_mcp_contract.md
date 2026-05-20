@@ -84,9 +84,14 @@ Read tools:
 ```txt
 wiki_search
 wiki_get_page
+wiki_graph_query
+```
+
+Planned read tools:
+
+```txt
 wiki_get_backlinks
 wiki_get_outgoing
-wiki_graph_query
 wiki_find_paths
 wiki_rag_query
 wiki_recent
@@ -110,9 +115,15 @@ format = markdown
 Write and proposal tools:
 
 ```txt
-wiki_capture
 wiki_add_note
-wiki_append_note
+wiki_append_page
+wiki_link_pages
+```
+
+Planned write and proposal tools:
+
+```txt
+wiki_capture
 wiki_propose_changes
 wiki_create_page
 wiki_update_page
@@ -144,7 +155,9 @@ wiki_link_pages
 wiki_runtime
 ```
 
-`wiki_get_page` returns Markdown by default. `wiki_add_note`, `wiki_append_page`, and `wiki_link_pages` default to proposal mode. `mode: "direct"` is available for local trusted use and writes to SQLite.
+`wiki_get_page` returns Markdown by default. `wiki_add_note`, `wiki_append_page`, and `wiki_link_pages` default to proposal mode. `mode: "direct"` is available for trusted use and writes to SQLite.
+
+`wiki_rag_query` is not implemented yet. Until semantic search exists, agents should use `wiki_search`, `wiki_graph_query`, then `wiki_get_page` for Markdown context.
 
 ## Example: `wiki_rag_query`
 
@@ -204,10 +217,10 @@ Input:
 {
   "title": "Codex note: MCP should be read/write",
   "body": "Decision: MCP is not only for querying memory. Agents should also use it to add notes, append useful session outcomes, and connect pages with [[wikilinks]].",
-  "kind": "article",
-  "agent_id": "agent-codex",
-  "source_session_id": "session_...",
-  "target_pages": ["Personal wiki", "MCP", "Agent memory"],
+  "kind": "note",
+  "agentId": "agent-codex",
+  "sourceSessionId": "session_...",
+  "targetPages": ["Personal wiki", "MCP", "Agent memory"],
   "mode": "propose"
 }
 ```

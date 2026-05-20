@@ -17,6 +17,15 @@ describe("graph", () => {
   ];
   const graph: PageGraph = { pages: [mcp, wiki, memory, note], links };
 
+  it("supports user-defined page kinds", () => {
+    const chat = createPage({ kind: "chat session", title: "Planning chat" }, now);
+
+    expect(chat).toMatchObject({
+      id: "chat-session-planning-chat",
+      kind: "chat-session"
+    });
+  });
+
   it("returns backlinks", () => {
     expect(getBacklinkPages(mcp.id, graph).map((page) => page.id)).toEqual([note.id]);
   });

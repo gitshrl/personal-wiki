@@ -3,6 +3,26 @@ import { createWikiRepository, openWikiDatabase } from "@personal-wiki/wiki-db";
 import { createServerApp } from "./app";
 
 describe("server app", () => {
+  it("returns quiet empty payloads for a new local wiki", async () => {
+    const { app, close } = createTestApp();
+
+    try {
+      const pages = await app.request("/api/pages");
+      const pagesJson = (await pages.json()) as { pages: unknown[] };
+      expect(pagesJson.pages).toEqual([]);
+
+      const graph = await app.request("/api/graph");
+      const graphJson = (await graph.json()) as { pages: unknown[]; links: unknown[] };
+      expect(graphJson).toMatchObject({ pages: [], links: [] });
+
+      const search = await app.request("/api/search?q=missing");
+      const searchJson = (await search.json()) as { pages: unknown[] };
+      expect(searchJson.pages).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
   it("creates pages, returns markdown, and searches", async () => {
     const { app, close } = createTestApp();
 
@@ -27,6 +47,30 @@ describe("server app", () => {
       const search = await app.request("/api/search?q=Protocol");
       const searchJson = (await search.json()) as { pages: Array<{ title: string }> };
       expect(searchJson.pages.map((page) => page.title)).toEqual(["MCP"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("normalizes custom page kinds", async () => {
+    const { app, close } = createTestApp();
+
+    try {
+      const response = await app.request("/api/pages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "chat session",
+          title: "Planning chat"
+        })
+      });
+
+      expect(response.status).toBe(201);
+      const json = (await response.json()) as { page: { id: string; kind: string } };
+      expect(json.page).toMatchObject({
+        id: "chat-session-planning-chat",
+        kind: "chat-session"
+      });
     } finally {
       close();
     }

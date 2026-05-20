@@ -65,7 +65,7 @@ The wiki should feel better than reading raw Markdown, Obsidian search results, 
 
 ### 3. Agent-Written Pages, Not Opaque Memories
 
-Agents should write notes that become normal `Article` pages.
+Agents should write notes that become normal wiki pages.
 
 The user should be able to read, edit, link, review, and trust them. Do not hide memory in vector chunks or opaque JSON.
 
