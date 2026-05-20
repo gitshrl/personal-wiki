@@ -18,6 +18,9 @@ describe("server app", () => {
       const pagesJson = (await pages.json()) as { pages: unknown[] };
       expect(pagesJson.pages).toEqual([]);
 
+      const largerPageList = await app.request("/api/pages?limit=500");
+      expect(largerPageList.status).toBe(200);
+
       const graph = await app.request("/api/graph");
       const graphJson = (await graph.json()) as { pages: unknown[]; links: unknown[] };
       expect(graphJson).toMatchObject({ pages: [], links: [] });

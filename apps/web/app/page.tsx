@@ -53,7 +53,7 @@ type SearchItem = {
   hint: string;
 };
 
-const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "http://127.0.0.1:4321";
+const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "/wiki-api";
 
 export default function Home() {
   const [pages, setPages] = useState<WikiPage[]>([]);
