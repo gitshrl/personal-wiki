@@ -107,6 +107,7 @@ describe("wiki-index", () => {
         pageId: page.id,
         qdrantPointId: expect.any(String)
       });
+      expect(repo.listIndexJobs({ pageId: page.id, status: "pending" })).toEqual([]);
       expect(qdrant.points).toHaveLength(1);
 
       const semantic = await searchWikiSemantic(repo, {

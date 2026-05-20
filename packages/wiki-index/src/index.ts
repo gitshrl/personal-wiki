@@ -497,6 +497,7 @@ export async function indexWikiPages(
         await qdrant.deletePagePoints(page.id);
         repo.replacePageChunks(page.id, [], { now });
         repo.updateIndexJobStatus(job.id, "done", { finishedAt: new Date().toISOString() });
+        finishPendingIndexJobs(repo, page.id, "done");
         result.skippedPages += 1;
         continue;
       }
@@ -528,6 +529,7 @@ export async function indexWikiPages(
       await qdrant.deletePagePoints(page.id);
       await qdrant.upsertPoints(points);
       repo.updateIndexJobStatus(job.id, "done", { finishedAt: new Date().toISOString() });
+      finishPendingIndexJobs(repo, page.id, "done");
       result.indexedPages += 1;
       result.indexedChunks += chunks.length;
     } catch (error) {
@@ -536,6 +538,7 @@ export async function indexWikiPages(
         error: message,
         finishedAt: new Date().toISOString()
       });
+      finishPendingIndexJobs(repo, page.id, "failed", message);
       result.failures.push({ pageId: page.id, error: message });
     }
   }
@@ -731,6 +734,17 @@ function fallbackSearch(
     snippet: createSnippet(`${page.summary ?? ""}\n${page.body}`, query),
     reason: query ? "SQLite full-text match" : "recent page"
   }));
+}
+
+function finishPendingIndexJobs(
+  repo: WikiRepository,
+  pageId: string,
+  status: "done" | "failed",
+  error?: string | undefined
+): void {
+  for (const pendingJob of repo.listIndexJobs({ pageId, status: "pending" })) {
+    repo.updateIndexJobStatus(pendingJob.id, status, { error });
+  }
 }
 
 function toRagResult(input: {
