@@ -68,9 +68,12 @@ Current implementation:
 - Empty search returns recent pages from SQLite.
 - Page reads return Markdown by default through MCP.
 - Graph reads use SQLite links and recursive traversal.
-- Qdrant, semantic search, and RAG are not implemented yet.
+- `wiki_rebuild_index` chunks pages, calls OpenAI embeddings, and upserts Qdrant points.
+- `wiki_rag_query` returns agent-readable Markdown context.
+- `/api/index/rebuild` and `/api/rag` expose the same flow over HTTP.
+- If semantic indexing is unavailable, RAG falls back to SQLite FTS.
 
-Target search stack:
+Current search stack:
 
 1. Title and alias search from SQLite.
 2. Keyword search from SQLite FTS5.
@@ -80,25 +83,23 @@ This gives useful behavior before full RAG is tuned.
 
 Use `text-embedding-3-small` for the first semantic index. Keep the provider configurable so the index can be rebuilt with another model. OpenAI's embeddings docs list `text-embedding-3-small` as 1536 dimensions by default and `text-embedding-3-large` as 3072 dimensions by default.
 
-If no `OPENAI_API_KEY` is configured, semantic indexing should stay disabled and the product should continue with SQLite title, alias, and FTS search.
+OpenAI, embedding, and Qdrant settings live in `~/.personal-wiki/config.json`. Do not store the API key in tracked source. Do not use environment variables for these settings.
 
 ## RAG Pipeline
 
-`wiki_rag_query` is planned. It is not implemented in the MCP server yet.
+`wiki_rag_query` is implemented in the MCP server. It returns Markdown by default so agents can read the wiki as context.
 
-For `wiki_rag_query`:
+Current `wiki_rag_query` flow:
 
 1. Normalize the user query.
-2. Search titles and aliases.
-3. Run FTS5 keyword search.
-4. Run Qdrant vector search.
-5. Merge candidates.
-6. Expand one graph hop from top pages.
-7. Rank by semantic score, FTS score, page kind, trust, recency, pinned status, and graph distance.
-8. Return compact snippets and page IDs.
-9. Let the agent read full resources only when needed.
+2. Embed the query with `text-embedding-3-small` when configured.
+3. Run Qdrant vector search against `personal_wiki_chunks`.
+4. Resolve Qdrant payloads back to SQLite pages and chunks.
+5. Expand related page IDs from SQLite links.
+6. Render Markdown context with matched snippets, page frontmatter, body, backlinks, and outgoing links.
+7. Fall back to SQLite FTS when semantic search cannot run.
 
-Do not dump full pages into every answer. The MCP client should get small results first, then read selected pages.
+The current implementation returns full selected page Markdown because the agent-facing read path should be useful immediately. Tune this later if context gets too large.
 
 ## Hybrid Search
 
@@ -106,8 +107,8 @@ Qdrant supports hybrid and multi-stage queries with dense and sparse representat
 
 Suggested phases:
 
-1. SQLite FTS5 only.
-2. Qdrant dense vectors with `text-embedding-3-small`.
+1. SQLite FTS5 only. Done.
+2. Qdrant dense vectors with `text-embedding-3-small`. Done.
 3. Qdrant dense plus sparse hybrid.
 4. Optional reranker.
 5. Optional graph-aware ranking.

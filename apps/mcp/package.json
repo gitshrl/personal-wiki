@@ -16,6 +16,7 @@
     "@personal-wiki/wiki-agent": "workspace:*",
     "@personal-wiki/wiki-core": "workspace:*",
     "@personal-wiki/wiki-db": "workspace:*",
+    "@personal-wiki/wiki-index": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {

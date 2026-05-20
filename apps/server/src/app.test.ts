@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createWikiRepository, openWikiDatabase } from "@personal-wiki/wiki-db";
 import { createServerApp } from "./app";
+import type {
+  EmbeddingProvider,
+  QdrantPoint,
+  QdrantSearchHit,
+  QdrantStore,
+  WikiIndexConfig
+} from "@personal-wiki/wiki-index";
 
 describe("server app", () => {
   it("returns quiet empty payloads for a new local wiki", async () => {
@@ -137,9 +144,61 @@ describe("server app", () => {
       close();
     }
   });
+
+  it("rebuilds the semantic index and serves RAG context", async () => {
+    const qdrant = new FakeQdrantStore();
+    const { app, close } = createTestApp({
+      indexConfig: testIndexConfig,
+      embeddingProvider: new FakeEmbeddingProvider(),
+      qdrant
+    });
+
+    try {
+      await app.request("/api/pages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "topic",
+          title: "Vector search",
+          body: "Qdrant stores embeddings for semantic wiki retrieval."
+        })
+      });
+
+      const status = await app.request("/api/index/status");
+      const statusJson = (await status.json()) as {
+        status: { embedding: { configured: boolean } };
+      };
+      expect(statusJson.status.embedding.configured).toBe(true);
+
+      const rebuild = await app.request("/api/index/rebuild", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({})
+      });
+      expect(rebuild.status).toBe(200);
+      expect(qdrant.points).toHaveLength(1);
+
+      const rag = await app.request("/api/rag", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: "semantic embeddings" })
+      });
+      const ragJson = (await rag.json()) as { mode: string; markdown: string };
+      expect(ragJson.mode).toBe("semantic");
+      expect(ragJson.markdown).toContain("# Vector search");
+    } finally {
+      close();
+    }
+  });
 });
 
-function createTestApp() {
+function createTestApp(
+  options: {
+    indexConfig?: WikiIndexConfig | undefined;
+    embeddingProvider?: EmbeddingProvider | undefined;
+    qdrant?: QdrantStore | undefined;
+  } = {}
+) {
   const db = openWikiDatabase({ path: ":memory:" });
   const repo = createWikiRepository(db);
   return {
@@ -154,8 +213,66 @@ function createTestApp() {
         qdrantStorageDir: "/tmp/personal-wiki-test/qdrant",
         logsDir: "/tmp/personal-wiki-test/logs",
         backupsDir: "/tmp/personal-wiki-test/backups"
-      }
+      },
+      indexConfig: options.indexConfig,
+      embeddingProvider: options.embeddingProvider,
+      qdrant: options.qdrant
     }),
     close: () => db.close()
   };
+}
+
+const testIndexConfig: WikiIndexConfig = {
+  embedding: {
+    provider: "openai",
+    model: "text-embedding-3-small",
+    dimensions: 1536,
+    apiKey: "test-key",
+    baseUrl: "https://api.openai.com/v1"
+  },
+  qdrant: {
+    url: "http://127.0.0.1:6333",
+    collection: "test_chunks",
+    vectorSize: 1536,
+    distance: "Cosine"
+  }
+};
+
+class FakeEmbeddingProvider implements EmbeddingProvider {
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map((text) => [
+      text.toLowerCase().includes("semantic") ? 1 : 0,
+      text.toLowerCase().includes("embedding") ? 1 : 0
+    ]);
+  }
+}
+
+class FakeQdrantStore implements QdrantStore {
+  readonly points: QdrantPoint[] = [];
+
+  async ensureCollection(): Promise<void> {}
+
+  async upsertPoints(points: QdrantPoint[]): Promise<void> {
+    this.points.push(...points);
+  }
+
+  async deletePagePoints(pageId: string): Promise<void> {
+    for (let index = this.points.length - 1; index >= 0; index -= 1) {
+      if (this.points[index]?.payload.pageId === pageId) {
+        this.points.splice(index, 1);
+      }
+    }
+  }
+
+  async search(vector: number[]): Promise<QdrantSearchHit[]> {
+    return this.points.map((point) => ({
+      id: point.id,
+      score: point.vector.reduce((sum, value, index) => sum + value * (vector[index] ?? 0), 0),
+      payload: point.payload
+    }));
+  }
+
+  async health() {
+    return { online: true };
+  }
 }

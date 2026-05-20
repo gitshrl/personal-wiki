@@ -11,9 +11,21 @@ import {
   type AddNoteInput
 } from "@personal-wiki/wiki-agent";
 import type { WikiProposal, WikiRepository } from "@personal-wiki/wiki-db";
+import {
+  getWikiIndexConfig,
+  indexWikiPages,
+  queryWikiRag as runWikiRagQuery,
+  type EmbeddingProvider,
+  type QdrantStore,
+  type WikiIndexConfig,
+  type WikiRagQueryResult
+} from "@personal-wiki/wiki-index";
 
 export interface WikiToolContext {
   repo: WikiRepository;
+  indexConfig?: WikiIndexConfig | undefined;
+  embeddingProvider?: EmbeddingProvider | undefined;
+  qdrant?: QdrantStore | undefined;
 }
 
 export interface WikiSearchInput {
@@ -29,6 +41,18 @@ export interface WikiGetPageInput {
 export interface WikiGraphQueryInput {
   focusPageId?: string | undefined;
   depth?: number | undefined;
+  limit?: number | undefined;
+}
+
+export interface WikiRagQueryInput {
+  query: string;
+  limit?: number | undefined;
+  depth?: number | undefined;
+  format?: "markdown" | "json" | undefined;
+}
+
+export interface WikiRebuildIndexInput {
+  pageIds?: string[] | undefined;
   limit?: number | undefined;
 }
 
@@ -204,6 +228,39 @@ export function queryWikiGraph(context: WikiToolContext, input: WikiGraphQueryIn
   };
 }
 
+export async function queryWikiRag(
+  context: WikiToolContext,
+  input: WikiRagQueryInput
+): Promise<WikiRagQueryResult> {
+  return runWikiRagQuery(context.repo, {
+    query: input.query,
+    limit: normalizeLimit(input.limit ?? 5, 20),
+    depth: input.depth === undefined ? 1 : normalizeDepth(input.depth),
+    config: getContextIndexConfig(context),
+    embeddingProvider: context.embeddingProvider,
+    qdrant: context.qdrant
+  });
+}
+
+export async function rebuildWikiIndex(
+  context: WikiToolContext,
+  input: WikiRebuildIndexInput = {}
+) {
+  const config = getContextIndexConfig(context);
+  if (!config.embedding.apiKey && !context.embeddingProvider) {
+    throw new Error("OpenAI API key is required in ~/.personal-wiki/config.json");
+  }
+
+  return indexWikiPages(context.repo, {
+    pageIds: input.pageIds,
+    limit: input.limit,
+    reason: "mcp_rebuild",
+    config,
+    embeddingProvider: context.embeddingProvider,
+    qdrant: context.qdrant
+  });
+}
+
 export function listRecentWikiPages(context: WikiToolContext, limit = 20) {
   return context.repo.listPages({ limit: normalizeLimit(limit, 100) }).map(summarizePage);
 }
@@ -275,4 +332,13 @@ function appendBody(current: string, next: string): string {
 function normalizeLimit(value: number, max: number): number {
   if (!Number.isFinite(value)) return Math.min(20, max);
   return Math.max(1, Math.min(max, Math.floor(value)));
+}
+
+function normalizeDepth(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(0, Math.min(3, Math.floor(value)));
+}
+
+function getContextIndexConfig(context: WikiToolContext): WikiIndexConfig {
+  return context.indexConfig ?? getWikiIndexConfig();
 }

@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { createWikiRepository, openWikiDatabase } from "@personal-wiki/wiki-db";
-import { addWikiNote, getWikiPage, queryWikiGraph, searchWiki } from "./wiki-tools";
+import {
+  addWikiNote,
+  getWikiPage,
+  queryWikiGraph,
+  queryWikiRag,
+  rebuildWikiIndex,
+  searchWiki
+} from "./wiki-tools";
+import type {
+  EmbeddingProvider,
+  QdrantPoint,
+  QdrantSearchHit,
+  QdrantStore,
+  WikiIndexConfig
+} from "@personal-wiki/wiki-index";
 
 describe("wiki MCP tool actions", () => {
   it("reads pages as Markdown by default", () => {
@@ -84,13 +98,109 @@ describe("wiki MCP tool actions", () => {
       close();
     }
   });
+
+  it("rebuilds semantic index and returns Markdown context", async () => {
+    const qdrant = new FakeQdrantStore();
+    const { context, close } = createContext({
+      indexConfig: testIndexConfig,
+      embeddingProvider: new FakeEmbeddingProvider(),
+      qdrant
+    });
+
+    try {
+      context.repo.createPage({
+        kind: "topic",
+        title: "Agent RAG",
+        body: "Agents can ask for semantic wiki context."
+      });
+
+      const rebuild = await rebuildWikiIndex(context);
+      expect(rebuild.indexedPages).toBe(1);
+      expect(qdrant.points).toHaveLength(1);
+
+      const rag = await queryWikiRag(context, {
+        query: "semantic wiki context",
+        format: "markdown"
+      });
+      expect(rag.mode).toBe("semantic");
+      expect(rag.markdown).toContain("# Agent RAG");
+    } finally {
+      close();
+    }
+  });
 });
 
-function createContext() {
+function createContext(
+  options: {
+    indexConfig?: WikiIndexConfig | undefined;
+    embeddingProvider?: EmbeddingProvider | undefined;
+    qdrant?: QdrantStore | undefined;
+  } = {}
+) {
   const db = openWikiDatabase({ path: ":memory:" });
   const repo = createWikiRepository(db);
   return {
-    context: { repo },
+    context: {
+      repo,
+      indexConfig: options.indexConfig,
+      embeddingProvider: options.embeddingProvider,
+      qdrant: options.qdrant
+    },
     close: () => db.close()
   };
+}
+
+const testIndexConfig: WikiIndexConfig = {
+  embedding: {
+    provider: "openai",
+    model: "text-embedding-3-small",
+    dimensions: 1536,
+    apiKey: "test-key",
+    baseUrl: "https://api.openai.com/v1"
+  },
+  qdrant: {
+    url: "http://127.0.0.1:6333",
+    collection: "test_chunks",
+    vectorSize: 1536,
+    distance: "Cosine"
+  }
+};
+
+class FakeEmbeddingProvider implements EmbeddingProvider {
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map((text) => [
+      text.toLowerCase().includes("semantic") ? 1 : 0,
+      text.toLowerCase().includes("wiki") ? 1 : 0
+    ]);
+  }
+}
+
+class FakeQdrantStore implements QdrantStore {
+  readonly points: QdrantPoint[] = [];
+
+  async ensureCollection(): Promise<void> {}
+
+  async upsertPoints(points: QdrantPoint[]): Promise<void> {
+    this.points.push(...points);
+  }
+
+  async deletePagePoints(pageId: string): Promise<void> {
+    for (let index = this.points.length - 1; index >= 0; index -= 1) {
+      if (this.points[index]?.payload.pageId === pageId) {
+        this.points.splice(index, 1);
+      }
+    }
+  }
+
+  async search(vector: number[]): Promise<QdrantSearchHit[]> {
+    return this.points.map((point) => ({
+      id: point.id,
+      score: point.vector.reduce((sum, value, index) => sum + value * (vector[index] ?? 0), 0),
+      payload: point.payload
+    }));
+  }
+
+  async health() {
+    return { online: true };
+  }
 }

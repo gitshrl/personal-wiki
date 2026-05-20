@@ -19,13 +19,19 @@ import {
   linkWikiPages,
   listRecentWikiPages,
   queryWikiGraph,
+  queryWikiRag,
+  rebuildWikiIndex,
   searchWiki,
   type WikiToolContext
 } from "./wiki-tools";
+import type { EmbeddingProvider, QdrantStore, WikiIndexConfig } from "@personal-wiki/wiki-index";
 
 export interface CreatePersonalWikiMcpServerOptions {
   repo?: WikiRepository;
   runtimePaths?: PersonalWikiRuntimePaths;
+  indexConfig?: WikiIndexConfig | undefined;
+  embeddingProvider?: EmbeddingProvider | undefined;
+  qdrant?: QdrantStore | undefined;
 }
 
 export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServerOptions = {}) {
@@ -35,7 +41,12 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
   const repo =
     options.repo ??
     createWikiRepository(openWikiDatabase({ path: runtimePaths.databasePath, migrate: true }));
-  const context: WikiToolContext = { repo };
+  const context: WikiToolContext = {
+    repo,
+    indexConfig: options.indexConfig,
+    embeddingProvider: options.embeddingProvider,
+    qdrant: options.qdrant
+  };
   const server = new McpServer({
     name: "personal-wiki",
     version: "0.1.0"
@@ -141,6 +152,40 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
       }
     },
     async (input) => jsonToolResult(queryWikiGraph(context, input))
+  );
+
+  server.registerTool(
+    "wiki_rag_query",
+    {
+      title: "Query Wiki Context",
+      description: "Search the wiki with semantic RAG when indexed, falling back to SQLite FTS.",
+      inputSchema: {
+        query: z.string().default(""),
+        limit: z.number().int().min(1).max(20).optional(),
+        depth: z.number().int().min(0).max(3).optional(),
+        format: z.enum(["markdown", "json"]).optional()
+      }
+    },
+    async (input) => {
+      const result = await queryWikiRag(context, input);
+      if ((input.format ?? "markdown") === "markdown") {
+        return textToolResult(result.markdown);
+      }
+      return jsonToolResult(result);
+    }
+  );
+
+  server.registerTool(
+    "wiki_rebuild_index",
+    {
+      title: "Rebuild Wiki Index",
+      description: "Chunk pages, embed with OpenAI, and upsert vectors into Qdrant.",
+      inputSchema: {
+        pageIds: z.array(z.string().min(1)).optional(),
+        limit: z.number().int().min(1).max(500).optional()
+      }
+    },
+    async (input) => jsonToolResult(await rebuildWikiIndex(context, input))
   );
 
   server.registerTool(

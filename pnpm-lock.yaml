@@ -35,6 +35,9 @@ importers:
       '@personal-wiki/wiki-db':
         specifier: workspace:*
         version: link:../../packages/wiki-db
+      '@personal-wiki/wiki-index':
+        specifier: workspace:*
+        version: link:../../packages/wiki-index
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -139,6 +142,9 @@ importers:
       '@personal-wiki/wiki-core':
         specifier: workspace:*
         version: link:../wiki-core
+      '@personal-wiki/wiki-db':
+        specifier: workspace:*
+        version: link:../wiki-db
     devDependencies:
       vitest:
         specifier: ^1.6.0

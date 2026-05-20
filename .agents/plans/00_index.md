@@ -43,11 +43,11 @@ Build these as the main product path:
 Implemented workspace packages:
 
 - `apps/web`: Next.js 16 and React 19 UI shell based on `.agents/design/persona-wiki`, backed by the HTTP API.
-- `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, runtime info.
-- `apps/mcp`: stdio MCP server with page resources and wiki tools.
+- `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, runtime info, index rebuild, and RAG.
+- `apps/mcp`: stdio MCP server with page resources, wiki tools, RAG query, and index rebuild.
 - `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.
-- `packages/wiki-db`: SQLite schema, migrations, repository, revisions, proposals, FTS5 search.
-- `packages/wiki-index`: chunking, content hashes, and embedding config. It does not call OpenAI or Qdrant yet.
+- `packages/wiki-db`: SQLite schema, migrations, repository, revisions, proposals, chunks, index jobs, FTS5 search.
+- `packages/wiki-index`: chunking, content hashes, OpenAI embeddings, Qdrant sync, semantic search, and RAG Markdown context.
 - `packages/wiki-agent`: add-note proposal and page helpers.
 
 Implemented UI behavior:
@@ -73,7 +73,6 @@ Outside current scope:
 
 - Unreviewed direct writes for untrusted agents.
 - Remote MCP.
-- Qdrant indexing, semantic search, and RAG.
 - Complex edge types.
 - Multi-user permissions.
 - Full source crawlers.
@@ -83,12 +82,13 @@ Outside current scope:
 - Use English in plan files.
 - SQLite is the durable source of truth.
 - Qdrant is a rebuildable derived index.
-- Initial planned embedding model is `text-embedding-3-small`.
+- Initial embedding model is `text-embedding-3-small`.
+- OpenAI, embedding, and Qdrant settings live in `~/.personal-wiki/config.json`, not tracked source.
 - Runtime data lives under `~/.personal-wiki`.
 - Page kinds are data-driven and can grow by user/domain.
 - Edges stay plain in the core graph.
 - Graph queries stay light first: SQLite links and recursive CTEs.
 - Agent-facing memory reads return Markdown by default.
-- Contributor agents should not run manual DB operations or migrations unless the owner asks. Tests use in-memory databases.
+- Contributor agents may run database operations and migrations against local/dev databases. Tests use in-memory databases. Never run them against remote, shared, staging, or production databases unless the owner asks for that exact target.
 - MCP supports read and write/add-note flows.
 - Default write mode is proposal-only.

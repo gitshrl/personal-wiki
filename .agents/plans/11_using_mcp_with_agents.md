@@ -31,13 +31,41 @@ The MCP server creates and migrates the SQLite database when it starts.
 
 Set `PERSONAL_WIKI_HOME` only if you want another runtime directory. Default is `~/.personal-wiki`.
 
-Semantic indexing is planned, not implemented yet. It should use `text-embedding-3-small` and only run when `OPENAI_API_KEY` is available in the environment or config.
+OpenAI, embedding, and Qdrant settings live in `~/.personal-wiki/config.json`.
+
+Example:
+
+```json
+{
+  "openai": {
+    "apiKey": "...",
+    "baseUrl": "https://api.openai.com/v1"
+  },
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "qdrant": {
+    "url": "http://127.0.0.1:6333",
+    "collection": "personal_wiki_chunks",
+    "vectorSize": 1536,
+    "distance": "Cosine"
+  }
+}
+```
+
+Do not put OpenAI, embedding, or Qdrant settings in MCP client env. Keep the default runtime path unless you intentionally run a separate wiki home.
+
+Semantic indexing is implemented. It uses `text-embedding-3-small`, stores chunks in SQLite, and stores vectors in Qdrant.
 
 Current search is SQLite-backed:
 
 - `wiki_search` uses FTS5 and recent-page fallback.
 - `wiki_graph_query` reads SQLite links.
 - `wiki_get_page` returns Markdown by default.
+- `wiki_rag_query` uses Qdrant semantic search when indexed, with SQLite FTS fallback.
+- `wiki_rebuild_index` rebuilds Qdrant from SQLite.
 
 ## Install
 
@@ -71,10 +99,7 @@ Target client config after publish:
   "mcpServers": {
     "personal-wiki": {
       "command": "npx",
-      "args": ["-y", "@personal-wiki/mcp"],
-      "env": {
-        "PERSONAL_WIKI_HOME": "/home/dev/.personal-wiki"
-      }
+      "args": ["-y", "@personal-wiki/mcp"]
     }
   }
 }
@@ -84,23 +109,14 @@ For this project, npm is the best first publishing target because MCP clients al
 
 ## MCP Client Config
 
-Use this for MCP clients that accept `command`, `args`, and `env`.
+Use this for MCP clients that accept `command` and `args`.
 
 ```json
 {
   "mcpServers": {
     "personal-wiki": {
       "command": "pnpm",
-      "args": [
-        "--dir",
-        "/home/dev/code/lab/personal-wiki",
-        "--filter",
-        "@personal-wiki/mcp",
-        "dev"
-      ],
-      "env": {
-        "PERSONAL_WIKI_HOME": "/home/dev/.personal-wiki"
-      }
+      "args": ["--dir", "/home/dev/code/lab/personal-wiki", "--filter", "@personal-wiki/mcp", "dev"]
     }
   }
 }
@@ -114,10 +130,7 @@ If the client supports `cwd`, this also works:
     "personal-wiki": {
       "command": "pnpm",
       "args": ["--filter", "@personal-wiki/mcp", "dev"],
-      "cwd": "/home/dev/code/lab/personal-wiki",
-      "env": {
-        "PERSONAL_WIKI_HOME": "/home/dev/.personal-wiki"
-      }
+      "cwd": "/home/dev/code/lab/personal-wiki"
     }
   }
 }
@@ -133,6 +146,8 @@ Current tools:
 wiki_search
 wiki_get_page
 wiki_graph_query
+wiki_rag_query
+wiki_rebuild_index
 wiki_add_note
 wiki_append_page
 wiki_link_pages
@@ -173,6 +188,25 @@ Read a graph neighborhood:
   "focusPageId": "topic-personal-wiki",
   "depth": 2,
   "limit": 100
+}
+```
+
+Read RAG context as Markdown:
+
+```json
+{
+  "query": "how does this wiki use MCP as memory?",
+  "limit": 5,
+  "depth": 1,
+  "format": "markdown"
+}
+```
+
+Rebuild the semantic index:
+
+```json
+{
+  "limit": 500
 }
 ```
 
@@ -237,6 +271,7 @@ Tell agents this:
 Use the personal-wiki MCP server as durable project memory.
 Search before answering project-history questions.
 Read matching pages as Markdown.
+Use wiki_rag_query when you need compiled context.
 When new durable knowledge appears, call wiki_add_note.
 Use mode=propose by default.
 Use mode=direct only when i explicitly ask you to write.
@@ -276,4 +311,23 @@ Expected runtime path:
 
 ```txt
 /home/dev/.personal-wiki
+```
+
+Then rebuild and query the semantic index:
+
+```json
+{
+  "tool": "wiki_rebuild_index",
+  "arguments": {}
+}
+```
+
+```json
+{
+  "tool": "wiki_rag_query",
+  "arguments": {
+    "query": "personal wiki MCP",
+    "format": "markdown"
+  }
+}
 ```

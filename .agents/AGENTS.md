@@ -68,6 +68,32 @@ Use this layout:
   backups/
 ```
 
+Store OpenAI, embedding, and Qdrant settings in `~/.personal-wiki/config.json`.
+
+Current config shape:
+
+```json
+{
+  "openai": {
+    "apiKey": "...",
+    "baseUrl": "https://api.openai.com/v1"
+  },
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "qdrant": {
+    "url": "http://127.0.0.1:6333",
+    "collection": "personal_wiki_chunks",
+    "vectorSize": 1536,
+    "distance": "Cosine"
+  }
+}
+```
+
+Do not rely on environment variables for OpenAI, embedding, or Qdrant settings.
+
 Do not commit local databases, Qdrant snapshots, resources, uploads, logs, secrets, raw credentials, or private captures.
 
 Agents may run database operations and migrations against local/dev databases. Tests may use in-memory databases. Never run database operations against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
@@ -140,11 +166,11 @@ pnpm dev:mcp
 Implemented packages:
 
 - `apps/web`: Next.js 16 UI shell from the persona-wiki design.
-- `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, and runtime info.
-- `apps/mcp`: stdio MCP server.
+- `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, runtime info, index rebuild, and RAG.
+- `apps/mcp`: stdio MCP server with read, write, graph, RAG, and index rebuild tools.
 - `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.
-- `packages/wiki-db`: SQLite migrations, repositories, FTS5, revisions, proposals.
-- `packages/wiki-index`: chunking and `text-embedding-3-small` config. OpenAI and Qdrant calls are planned, not implemented.
+- `packages/wiki-db`: SQLite migrations, repositories, FTS5, chunks, index jobs, revisions, proposals.
+- `packages/wiki-index`: chunking, OpenAI embeddings, Qdrant sync, semantic search, and RAG Markdown context.
 - `packages/wiki-agent`: add-note proposal and direct note helpers.
 
 Implemented MCP tools:
@@ -152,6 +178,8 @@ Implemented MCP tools:
 - `wiki_search`
 - `wiki_get_page`
 - `wiki_graph_query`
+- `wiki_rag_query`
+- `wiki_rebuild_index`
 - `wiki_add_note`
 - `wiki_append_page`
 - `wiki_link_pages`

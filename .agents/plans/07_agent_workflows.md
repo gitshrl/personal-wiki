@@ -22,7 +22,7 @@ Recommended defaults:
 - Loka: `propose_only`, maybe `trusted_write` for maintenance after review
 - Unknown clients: `read_only`
 
-Direct writes currently create page revisions. `mcp_audit_log` is in the schema plan, but tool-call logging is not implemented yet.
+Direct writes currently create page revisions and enqueue index jobs when page content changes. `mcp_audit_log` is in the schema plan, but tool-call logging is not implemented yet.
 
 ## Add Note Flow
 
@@ -32,16 +32,16 @@ Use this when a chat produces a durable insight, decision, task, or useful synth
 2. Server resolves target pages and wikilinks.
 3. Trusted low-risk writes can apply directly.
 4. Other writes create a proposal.
-5. Accepted notes update backlinks, outgoing links, and revisions. Index jobs are planned for the semantic index.
+5. Accepted notes update backlinks, outgoing links, revisions, and index jobs.
 
 Good notes are short. They preserve the takeaway, not the whole transcript.
 
 ## Memory Sourcing During Chat
 
 1. Agent receives a user question.
-2. Agent calls `wiki_search` with a focused query. Later it can call `wiki_rag_query`.
-3. Server returns compact candidate pages.
-4. Agent reads only the needed `wiki://page/{id}` resources.
+2. Agent calls `wiki_rag_query` with a focused query when semantic context is useful.
+3. Server returns Markdown context from Qdrant or SQLite FTS fallback.
+4. Agent reads extra `wiki://page/{id}` resources only when needed.
 5. Agent answers using the selected memory.
 6. Agent does not write unless asked or the session ends with useful durable memory.
 
@@ -102,8 +102,8 @@ Nightly or manual jobs:
 - Detect duplicate titles and aliases.
 - Detect stale pages by `updated_at`.
 - Detect pages with no backlinks and no outgoing links.
-- Re-index changed chunks when Qdrant is implemented.
-- Check Qdrant point count against SQLite chunk count when Qdrant is implemented.
+- Rebuild the Qdrant index with `wiki_rebuild_index` or `POST /api/index/rebuild`.
+- Check Qdrant point count against SQLite chunk count.
 
 Maintenance jobs should create proposals or review items. They should not silently rewrite the wiki.
 

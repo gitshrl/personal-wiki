@@ -26,6 +26,7 @@ import type {
 import type { WikiDatabase } from "./database";
 
 export type ProposalStatus = "pending" | "accepted" | "rejected" | "applied";
+export type IndexJobStatus = "pending" | "running" | "done" | "failed";
 
 export interface WikiProposal {
   id: string;
@@ -66,6 +67,47 @@ export interface CreatePageRevisionInput {
   changedBy: string;
   changeReason?: string | undefined;
   createdAt?: string | undefined;
+}
+
+export interface WikiStoredChunk {
+  id: string;
+  pageId: string;
+  contentHash: string;
+  chunkIndex: number;
+  text: string;
+  tokenCount?: number | undefined;
+  qdrantPointId?: string | undefined;
+  updatedAt: string;
+}
+
+export interface SaveChunkInput {
+  id: string;
+  pageId: string;
+  contentHash: string;
+  chunkIndex: number;
+  text: string;
+  tokenCount?: number | undefined;
+  qdrantPointId?: string | undefined;
+}
+
+export interface WikiIndexJob {
+  id: string;
+  pageId: string;
+  reason: string;
+  status: IndexJobStatus;
+  error?: string | undefined;
+  createdAt: string;
+  finishedAt?: string | undefined;
+}
+
+export interface CreateIndexJobInput {
+  id?: string | undefined;
+  pageId: string;
+  reason: string;
+  status?: IndexJobStatus | undefined;
+  error?: string | undefined;
+  createdAt?: string | undefined;
+  finishedAt?: string | undefined;
 }
 
 export interface SavePageOptions {
@@ -127,6 +169,18 @@ export interface GraphNeighborhoodOptions {
 
 export interface FindPathsOptions {
   maxDepth?: number | undefined;
+  limit?: number | undefined;
+}
+
+export interface ListChunksOptions {
+  pageId?: string | undefined;
+  limit?: number | undefined;
+  offset?: number | undefined;
+}
+
+export interface ListIndexJobsOptions {
+  pageId?: string | undefined;
+  status?: IndexJobStatus | undefined;
   limit?: number | undefined;
 }
 
@@ -200,6 +254,27 @@ interface RevisionRow {
   created_at: string;
 }
 
+interface ChunkRow {
+  id: string;
+  page_id: string;
+  content_hash: string;
+  chunk_index: number;
+  text: string;
+  token_count: number | null;
+  qdrant_point_id: string | null;
+  updated_at: string;
+}
+
+interface IndexJobRow {
+  id: string;
+  page_id: string;
+  reason: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
 interface IdRow {
   id: string;
 }
@@ -207,6 +282,7 @@ interface IdRow {
 const pageStatuses = new Set<string>(["active", "archived", "draft"]);
 const linkOrigins = new Set<string>(["wikilink", "manual", "proposal", "system"]);
 const proposalStatuses = new Set<string>(["pending", "accepted", "rejected", "applied"]);
+const indexJobStatuses = new Set<string>(["pending", "running", "done", "failed"]);
 
 export class WikiRepository {
   constructor(private readonly db: WikiDatabase) {}
@@ -231,6 +307,14 @@ export class WikiRepository {
       (!existing ||
         existing.title !== normalizedPage.title ||
         existing.body !== normalizedPage.body);
+    const shouldCreateIndexJob =
+      !existing ||
+      existing.kind !== normalizedPage.kind ||
+      existing.title !== normalizedPage.title ||
+      existing.body !== normalizedPage.body ||
+      existing.summary !== normalizedPage.summary ||
+      existing.sourceType !== normalizedPage.sourceType ||
+      existing.trust !== normalizedPage.trust;
 
     const save = this.db.transaction(() => {
       this.upsertPageRow(normalizedPage);
@@ -247,6 +331,16 @@ export class WikiRepository {
             body: normalizedPage.body,
             changedBy: options.changedBy ?? normalizedPage.createdByAgentId ?? "system",
             changeReason: options.changeReason,
+            createdAt: now
+          })
+        );
+      }
+
+      if (shouldCreateIndexJob) {
+        this.insertIndexJobRow(
+          createIndexJob({
+            pageId: normalizedPage.id,
+            reason: existing ? "page_updated" : "page_created",
             createdAt: now
           })
         );
@@ -556,6 +650,142 @@ export class WikiRepository {
     }
 
     return (this.db.prepare(sql).all(params) as RevisionRow[]).map(rowToRevision);
+  }
+
+  replacePageChunks(
+    pageId: string,
+    chunks: SaveChunkInput[],
+    options: { now?: string | undefined } = {}
+  ): WikiStoredChunk[] {
+    const now = options.now ?? new Date().toISOString();
+    const replace = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM chunks WHERE page_id = ?").run(pageId);
+
+      for (const chunk of chunks) {
+        this.upsertChunkRow({
+          ...chunk,
+          pageId,
+          updatedAt: now
+        });
+      }
+    });
+
+    replace();
+    return this.listChunks({ pageId });
+  }
+
+  getChunk(id: string): WikiStoredChunk | null {
+    const row = this.db.prepare("SELECT * FROM chunks WHERE id = ?").get(id) as
+      | ChunkRow
+      | undefined;
+    return row ? rowToChunk(row) : null;
+  }
+
+  listChunks(options: ListChunksOptions = {}): WikiStoredChunk[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (options.pageId) {
+      conditions.push("page_id = @pageId");
+      params.pageId = options.pageId;
+    }
+
+    let sql = "SELECT * FROM chunks";
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " ORDER BY page_id ASC, chunk_index ASC";
+
+    if (options.limit !== undefined) {
+      sql += " LIMIT @limit";
+      params.limit = normalizeLimit(options.limit);
+    } else if (options.offset !== undefined) {
+      sql += " LIMIT -1";
+    }
+
+    if (options.offset !== undefined) {
+      sql += " OFFSET @offset";
+      params.offset = Math.max(0, Math.floor(options.offset));
+    }
+
+    return (this.db.prepare(sql).all(params) as ChunkRow[]).map(rowToChunk);
+  }
+
+  setChunkQdrantPointId(chunkId: string, qdrantPointId: string): WikiStoredChunk {
+    this.db
+      .prepare("UPDATE chunks SET qdrant_point_id = ? WHERE id = ?")
+      .run(qdrantPointId, chunkId);
+    const chunk = this.getChunk(chunkId);
+    if (!chunk) {
+      throw new Error(`Chunk not found: ${chunkId}`);
+    }
+    return chunk;
+  }
+
+  createIndexJob(input: CreateIndexJobInput): WikiIndexJob {
+    const job = createIndexJob(input);
+    this.insertIndexJobRow(job);
+    return job;
+  }
+
+  getIndexJob(id: string): WikiIndexJob | null {
+    const row = this.db.prepare("SELECT * FROM index_jobs WHERE id = ?").get(id) as
+      | IndexJobRow
+      | undefined;
+    return row ? rowToIndexJob(row) : null;
+  }
+
+  listIndexJobs(options: ListIndexJobsOptions = {}): WikiIndexJob[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (options.pageId) {
+      conditions.push("page_id = @pageId");
+      params.pageId = options.pageId;
+    }
+
+    if (options.status) {
+      assertIndexJobStatus(options.status);
+      conditions.push("status = @status");
+      params.status = options.status;
+    }
+
+    let sql = "SELECT * FROM index_jobs";
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " ORDER BY created_at DESC, id ASC";
+
+    if (options.limit !== undefined) {
+      sql += " LIMIT @limit";
+      params.limit = normalizeLimit(options.limit);
+    }
+
+    return (this.db.prepare(sql).all(params) as IndexJobRow[]).map(rowToIndexJob);
+  }
+
+  updateIndexJobStatus(
+    id: string,
+    status: IndexJobStatus,
+    options: { error?: string | null | undefined; finishedAt?: string | null | undefined } = {}
+  ): WikiIndexJob {
+    assertIndexJobStatus(status);
+    const finishedAt =
+      options.finishedAt === undefined
+        ? status === "done" || status === "failed"
+          ? new Date().toISOString()
+          : undefined
+        : (options.finishedAt ?? undefined);
+
+    this.db
+      .prepare("UPDATE index_jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?")
+      .run(status, options.error ?? null, finishedAt ?? null, id);
+
+    const job = this.getIndexJob(id);
+    if (!job) {
+      throw new Error(`Index job not found: ${id}`);
+    }
+    return job;
   }
 
   getGraph(): PageGraph {
@@ -1006,6 +1236,87 @@ export class WikiRepository {
       });
   }
 
+  private upsertChunkRow(chunk: WikiStoredChunk): void {
+    this.db
+      .prepare(
+        `
+          INSERT INTO chunks (
+            id,
+            page_id,
+            content_hash,
+            chunk_index,
+            text,
+            token_count,
+            qdrant_point_id,
+            updated_at
+          ) VALUES (
+            @id,
+            @pageId,
+            @contentHash,
+            @chunkIndex,
+            @text,
+            @tokenCount,
+            @qdrantPointId,
+            @updatedAt
+          )
+          ON CONFLICT(id) DO UPDATE SET
+            page_id = excluded.page_id,
+            content_hash = excluded.content_hash,
+            chunk_index = excluded.chunk_index,
+            text = excluded.text,
+            token_count = excluded.token_count,
+            qdrant_point_id = excluded.qdrant_point_id,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run({
+        id: chunk.id,
+        pageId: chunk.pageId,
+        contentHash: chunk.contentHash,
+        chunkIndex: chunk.chunkIndex,
+        text: chunk.text,
+        tokenCount: chunk.tokenCount ?? null,
+        qdrantPointId: chunk.qdrantPointId ?? null,
+        updatedAt: chunk.updatedAt
+      });
+  }
+
+  private insertIndexJobRow(job: WikiIndexJob): void {
+    assertIndexJobStatus(job.status);
+
+    this.db
+      .prepare(
+        `
+          INSERT INTO index_jobs (
+            id,
+            page_id,
+            reason,
+            status,
+            error,
+            created_at,
+            finished_at
+          ) VALUES (
+            @id,
+            @pageId,
+            @reason,
+            @status,
+            @error,
+            @createdAt,
+            @finishedAt
+          )
+        `
+      )
+      .run({
+        id: job.id,
+        pageId: job.pageId,
+        reason: job.reason,
+        status: job.status,
+        error: job.error ?? null,
+        createdAt: job.createdAt,
+        finishedAt: job.finishedAt ?? null
+      });
+  }
+
   private replaceWikilinksForPage(page: WikiPage, now: string): void {
     const nextLinks = replaceWikilinkLinks(
       this.listLinks(),
@@ -1157,6 +1468,33 @@ function rowToRevision(row: RevisionRow): PageRevision {
   };
 }
 
+function rowToChunk(row: ChunkRow): WikiStoredChunk {
+  return {
+    id: row.id,
+    pageId: row.page_id,
+    contentHash: row.content_hash,
+    chunkIndex: row.chunk_index,
+    text: row.text,
+    tokenCount: row.token_count ?? undefined,
+    qdrantPointId: row.qdrant_point_id ?? undefined,
+    updatedAt: row.updated_at
+  };
+}
+
+function rowToIndexJob(row: IndexJobRow): WikiIndexJob {
+  assertIndexJobStatus(row.status);
+
+  return {
+    id: row.id,
+    pageId: row.page_id,
+    reason: row.reason,
+    status: row.status,
+    error: row.error ?? undefined,
+    createdAt: row.created_at,
+    finishedAt: row.finished_at ?? undefined
+  };
+}
+
 function createAlias(pageId: string, aliasValue: string, id?: string): PageAlias {
   const alias = aliasValue.trim();
   if (!alias) {
@@ -1185,6 +1523,29 @@ function createRevision(input: CreatePageRevisionInput): PageRevision {
     changedBy: input.changedBy,
     changeReason: input.changeReason,
     createdAt
+  };
+}
+
+function createIndexJob(input: CreateIndexJobInput): WikiIndexJob {
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const status = input.status ?? "pending";
+  assertIndexJobStatus(status);
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new Error("Index job reason is required");
+  }
+  return {
+    id:
+      input.id ??
+      `index-job-${shortHash(
+        `${input.pageId}:${reason}:${createdAt}:${Math.random().toString(36)}`
+      )}`,
+    pageId: input.pageId,
+    reason,
+    status,
+    error: input.error,
+    createdAt,
+    finishedAt: input.finishedAt
   };
 }
 
@@ -1224,6 +1585,12 @@ function assertLinkOrigin(value: string): asserts value is LinkOrigin {
 function assertProposalStatus(value: string): asserts value is ProposalStatus {
   if (!proposalStatuses.has(value)) {
     throw new Error(`Invalid proposal status: ${value}`);
+  }
+}
+
+function assertIndexJobStatus(value: string): asserts value is IndexJobStatus {
+  if (!indexJobStatuses.has(value)) {
+    throw new Error(`Invalid index job status: ${value}`);
   }
 }
 

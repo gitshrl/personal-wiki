@@ -85,6 +85,7 @@ Read tools:
 wiki_search
 wiki_get_page
 wiki_graph_query
+wiki_rag_query
 ```
 
 Planned read tools:
@@ -93,7 +94,6 @@ Planned read tools:
 wiki_get_backlinks
 wiki_get_outgoing
 wiki_find_paths
-wiki_rag_query
 wiki_recent
 ```
 
@@ -118,6 +118,7 @@ Write and proposal tools:
 wiki_add_note
 wiki_append_page
 wiki_link_pages
+wiki_rebuild_index
 ```
 
 Planned write and proposal tools:
@@ -149,6 +150,8 @@ Current stdio implementation:
 wiki_search
 wiki_get_page
 wiki_graph_query
+wiki_rag_query
+wiki_rebuild_index
 wiki_add_note
 wiki_append_page
 wiki_link_pages
@@ -157,7 +160,9 @@ wiki_runtime
 
 `wiki_get_page` returns Markdown by default. `wiki_add_note`, `wiki_append_page`, and `wiki_link_pages` default to proposal mode. `mode: "direct"` is available for trusted use and writes to SQLite.
 
-`wiki_rag_query` is not implemented yet. Until semantic search exists, agents should use `wiki_search`, `wiki_graph_query`, then `wiki_get_page` for Markdown context.
+`wiki_rag_query` returns Markdown by default. It uses Qdrant semantic search when the index exists, then falls back to SQLite FTS.
+
+`wiki_rebuild_index` chunks pages, embeds them with OpenAI, and writes Qdrant points. It reads OpenAI, embedding, and Qdrant settings from `~/.personal-wiki/config.json`.
 
 ## Example: `wiki_rag_query`
 
@@ -176,17 +181,19 @@ Output:
 
 ```json
 {
-  "answer_context": [
+  "query": "What do I know about MCP as agent memory?",
+  "mode": "semantic",
+  "markdown": "# Wiki Context\n...",
+  "results": [
     {
-      "page_id": "topic-mcp",
-      "title": "MCP",
-      "kind": "topic",
+      "page": { "id": "topic-mcp", "title": "MCP", "kind": "topic" },
       "snippet": "Model Context Protocol...",
       "score": 0.92,
-      "reason": "title and semantic match"
+      "reason": "semantic vector match",
+      "chunkId": "chunk-..."
     }
   ],
-  "suggested_resources": ["wiki://page/topic-mcp?format=markdown"]
+  "expandedPageIds": ["topic-mcp", "topic-personal-wiki"]
 }
 ```
 

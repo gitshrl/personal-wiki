@@ -77,6 +77,9 @@ PATCH  /api/pages/:id
 GET    /api/pages/:id/backlinks
 GET    /api/pages/:id/outgoing
 GET    /api/search?q=
+GET    /api/index/status
+POST   /api/index/rebuild
+POST   /api/rag
 GET    /api/graph?focus=&depth=
 POST   /api/links
 GET    /api/proposals
@@ -94,10 +97,9 @@ GET    /api/proposals/:id
 POST   /api/proposals/:id/accept
 POST   /api/proposals/:id/reject
 GET    /api/index/jobs
-POST   /api/index/rebuild
 ```
 
-`/api/index/rebuild` should be owner-only. Do not expose it through MCP without explicit admin tooling.
+`/api/index/rebuild` is local owner tooling. The MCP equivalent is `wiki_rebuild_index`; use it only for trusted local agents.
 
 ## Graph UI
 

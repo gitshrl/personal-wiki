@@ -119,7 +119,7 @@ Rules:
 ### Source Memory During Chat
 
 1. User chats with Claude, Codex, or another MCP client.
-2. Agent calls `wiki_search` now. Later it can call `wiki_rag_query` when semantic search exists.
+2. Agent calls `wiki_rag_query` for compiled context, or `wiki_search` for simple lookup.
 3. Agent reads selected pages through `wiki://page/{id}` resources as Markdown.
 4. Agent cites the wiki pages in its answer.
 5. No write happens unless the user asks or the session ends with useful memory.

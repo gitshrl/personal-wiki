@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@personal-wiki/wiki-core": "workspace:*"
+    "@personal-wiki/wiki-core": "workspace:*",
+    "@personal-wiki/wiki-db": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^1.6.0"

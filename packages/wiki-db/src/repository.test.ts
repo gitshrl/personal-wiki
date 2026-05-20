@@ -194,6 +194,66 @@ describe("WikiRepository", () => {
       );
     });
   });
+
+  it("queues index jobs and stores page chunks", () => {
+    withRepository(({ repo }) => {
+      const page = repo.createPage(
+        {
+          kind: "topic",
+          title: "Semantic search",
+          body: "Embeddings should stay aligned with saved pages."
+        },
+        { now }
+      );
+
+      expect(repo.listIndexJobs({ pageId: page.id })).toEqual([
+        expect.objectContaining({
+          pageId: page.id,
+          reason: "page_created",
+          status: "pending"
+        })
+      ]);
+
+      const chunks = repo.replacePageChunks(
+        page.id,
+        [
+          {
+            id: "chunk-one",
+            pageId: page.id,
+            contentHash: "hash-one",
+            chunkIndex: 0,
+            text: "Semantic search chunk",
+            tokenCount: 12,
+            qdrantPointId: "point-one"
+          }
+        ],
+        { now }
+      );
+
+      expect(chunks).toEqual([
+        expect.objectContaining({
+          id: "chunk-one",
+          pageId: page.id,
+          qdrantPointId: "point-one"
+        })
+      ]);
+
+      const job = repo.createIndexJob({
+        pageId: page.id,
+        reason: "test_rebuild",
+        status: "running",
+        createdAt: now
+      });
+      expect(
+        repo.updateIndexJobStatus(job.id, "done", {
+          finishedAt: "2026-05-20T00:04:00.000Z"
+        })
+      ).toMatchObject({
+        status: "done",
+        finishedAt: "2026-05-20T00:04:00.000Z"
+      });
+    });
+  });
 });
 
 function withRepository(

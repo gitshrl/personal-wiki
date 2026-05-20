@@ -31,21 +31,27 @@ Default config:
 
 ```json
 {
-  "databasePath": "~/.personal-wiki/personal-wiki.sqlite",
-  "resourcesDir": "~/.personal-wiki/resources",
-  "uploadsDir": "~/.personal-wiki/uploads",
-  "qdrantStorageDir": "~/.personal-wiki/qdrant",
+  "openai": {
+    "apiKey": "...",
+    "baseUrl": "https://api.openai.com/v1"
+  },
   "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
     "dimensions": 1536
+  },
+  "qdrant": {
+    "url": "http://127.0.0.1:6333",
+    "collection": "personal_wiki_chunks",
+    "vectorSize": 1536,
+    "distance": "Cosine"
   }
 }
 ```
 
 The code now creates this directory through `packages/wiki-core` runtime helpers. `packages/wiki-db` uses `~/.personal-wiki/personal-wiki.sqlite` as the default database path.
 
-The app and MCP server can create this directory at startup. Contributor agents should not run manual database operations or migrations unless the owner asks.
+The app and MCP server can create this directory at startup. Contributor agents may run database operations and migrations against local/dev databases. Never run them against remote, shared, staging, or production databases unless the owner asks for that exact target.
 
 ## Core Tables
 
@@ -165,15 +171,18 @@ mcp_audit_log
 
 ## Qdrant
 
-Qdrant will store derived semantic search points.
+Qdrant stores derived semantic search points.
 
 Current implementation status:
 
 - `packages/wiki-index` chunks pages and records embedding metadata.
-- It does not call OpenAI yet.
-- It does not write to Qdrant yet.
-- There is no RAG endpoint yet.
-- The app works without `OPENAI_API_KEY`.
+- It calls OpenAI embeddings through the configured base URL.
+- It creates the Qdrant collection when missing.
+- It deletes stale page points before upserting new page chunks.
+- It writes chunk rows and Qdrant point ids back to SQLite.
+- `apps/server` exposes `/api/index/status`, `/api/index/rebuild`, and `/api/rag`.
+- `apps/mcp` exposes `wiki_rebuild_index` and `wiki_rag_query`.
+- If no config key is present, RAG falls back to SQLite FTS.
 
 Initial embedding model:
 
@@ -185,7 +194,7 @@ Use this first because it is cheaper and good enough for personal wiki chunk sea
 
 Keep the embedding model in config. Do not bake it into table names or collection names.
 
-Indexing needs an API key only when semantic search is implemented and enabled. Read `OPENAI_API_KEY` from the environment or from local config under `~/.personal-wiki/config.json`. Never store it in the repo.
+Indexing needs an API key in `~/.personal-wiki/config.json`. Never store it in the repo. OpenAI, embedding, and Qdrant settings should come from that config file, not environment variables.
 
 If Qdrant runs locally, store its persistent volume under:
 
@@ -203,15 +212,16 @@ Suggested point payload:
 
 ```json
 {
-  "chunk_id": "chunk_...",
-  "page_id": "page_...",
-  "page_kind": "topic",
+  "chunkId": "chunk-...",
+  "pageId": "topic-mcp",
+  "pageKind": "topic",
   "title": "MCP",
   "slug": "mcp",
-  "chunk_index": 0,
-  "updated_at": "2026-05-20T22:00:00+07:00",
+  "chunkIndex": 0,
+  "text": "# MCP ...",
+  "updatedAt": "2026-05-20T22:00:00+07:00",
   "trust": "high",
-  "source_type": "note"
+  "sourceType": "note"
 }
 ```
 

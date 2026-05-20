@@ -17,11 +17,22 @@ import {
   openWikiDatabase,
   type WikiRepository
 } from "@personal-wiki/wiki-db";
-import { defaultEmbeddingConfig } from "@personal-wiki/wiki-index";
+import {
+  getWikiIndexConfig,
+  getWikiIndexStatus,
+  indexWikiPages,
+  queryWikiRag,
+  type EmbeddingProvider,
+  type QdrantStore,
+  type WikiIndexConfig
+} from "@personal-wiki/wiki-index";
 
 export interface CreateServerAppOptions {
   repo?: WikiRepository;
   runtimePaths?: PersonalWikiRuntimePaths;
+  indexConfig?: WikiIndexConfig | undefined;
+  embeddingProvider?: EmbeddingProvider | undefined;
+  qdrant?: QdrantStore | undefined;
 }
 
 const pageKindSchema = z
@@ -95,6 +106,17 @@ const proposalStatusSchema = z.object({
   status: proposalStatusValueSchema
 });
 
+const indexRebuildSchema = z.object({
+  pageIds: z.array(z.string().trim().min(1)).optional(),
+  limit: z.number().int().min(1).max(500).optional()
+});
+
+const ragQuerySchema = z.object({
+  query: z.string().trim().default(""),
+  limit: z.number().int().min(1).max(20).optional(),
+  depth: z.number().int().min(0).max(3).optional()
+});
+
 export function createServerApp(options: CreateServerAppOptions = {}) {
   const runtimePaths =
     options.runtimePaths ??
@@ -102,6 +124,7 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
   const repo =
     options.repo ??
     createWikiRepository(openWikiDatabase({ path: runtimePaths.databasePath, migrate: true }));
+  const getIndexConfig = () => options.indexConfig ?? getWikiIndexConfig();
   const app = new Hono();
 
   app.use(
@@ -129,12 +152,14 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
     })
   );
 
-  app.get("/api/runtime", (c) =>
-    c.json({
+  app.get("/api/runtime", (c) => {
+    const indexConfig = getIndexConfig();
+    return c.json({
       runtime: runtimePaths,
-      embedding: defaultEmbeddingConfig
-    })
-  );
+      embedding: publicEmbeddingConfig(indexConfig),
+      qdrant: publicQdrantConfig(indexConfig)
+    });
+  });
 
   app.get("/api/pages", (c) => {
     const query = parseSchema(pageListQuerySchema, c.req.query());
@@ -208,6 +233,50 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
       query: q,
       pages: q ? repo.searchPages(q, { limit }) : repo.listPages({ limit })
     });
+  });
+
+  app.get("/api/index/status", async (c) => {
+    const indexConfig = getIndexConfig();
+    const status = await getWikiIndexStatus(repo, {
+      config: indexConfig,
+      qdrant: options.qdrant
+    });
+    return c.json({ status });
+  });
+
+  app.post("/api/index/rebuild", async (c) => {
+    const input = parseSchema(indexRebuildSchema, await readJson(c.req));
+    const indexConfig = getIndexConfig();
+    if (!indexConfig.embedding.apiKey && !options.embeddingProvider) {
+      throw new ApiError(
+        400,
+        "OpenAI API key is required. Add it to ~/.personal-wiki/config.json."
+      );
+    }
+
+    const result = await indexWikiPages(repo, {
+      pageIds: input.pageIds,
+      limit: input.limit,
+      reason: "api_rebuild",
+      config: indexConfig,
+      embeddingProvider: options.embeddingProvider,
+      qdrant: options.qdrant
+    });
+    return c.json({ result });
+  });
+
+  app.post("/api/rag", async (c) => {
+    const input = parseSchema(ragQuerySchema, await readJson(c.req));
+    const indexConfig = getIndexConfig();
+    const result = await queryWikiRag(repo, {
+      query: input.query ?? "",
+      limit: input.limit,
+      depth: input.depth,
+      config: indexConfig,
+      embeddingProvider: options.embeddingProvider,
+      qdrant: options.qdrant
+    });
+    return c.json(result);
   });
 
   app.get("/api/graph", (c) => {
@@ -351,4 +420,22 @@ function parseLimit(value: string | undefined, fallback: number): number {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return fallback;
   return Math.max(1, Math.floor(numberValue));
+}
+
+function publicEmbeddingConfig(config: WikiIndexConfig) {
+  return {
+    provider: config.embedding.provider,
+    model: config.embedding.model,
+    dimensions: config.embedding.dimensions,
+    configured: Boolean(config.embedding.apiKey)
+  };
+}
+
+function publicQdrantConfig(config: WikiIndexConfig) {
+  return {
+    url: config.qdrant.url,
+    collection: config.qdrant.collection,
+    vectorSize: config.qdrant.vectorSize,
+    distance: config.qdrant.distance
+  };
 }

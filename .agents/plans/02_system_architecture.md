@@ -39,7 +39,7 @@ packages/wiki-core
         |
         +--> packages/wiki-db --> SQLite
         |
-        +--> packages/wiki-index --> chunks now, Qdrant later
+        +--> packages/wiki-index --> chunks, OpenAI embeddings, Qdrant
         |
         +--> proposal service
 
@@ -67,8 +67,8 @@ Suggested choices:
 - Hono for local HTTP.
 - Official MCP TypeScript SDK for the MCP server.
 - SQLite with a typed repository layer.
-- Qdrant client for future semantic search.
-- `text-embedding-3-small` as the initial planned embedding model.
+- Qdrant REST API for semantic search.
+- `text-embedding-3-small` as the initial embedding model.
 - A small internal package for chunking and index jobs.
 
 Keep the implementation boring. Avoid framework overlap between the web app, HTTP API, and MCP server.
@@ -93,17 +93,16 @@ Keep the implementation boring. Avoid framework overlap between the web app, HTT
 - FTS5 queries.
 - Revision reads and writes.
 
-`wiki-index` currently owns:
+`wiki-index` owns:
 
 - Chunk creation.
 - Content hashing.
 - Embedding metadata, starting with OpenAI `text-embedding-3-small`.
-
-`wiki-index` should later own:
-
 - Embedding provider calls.
 - Qdrant upsert/delete.
 - Rebuild logic.
+- Semantic search.
+- RAG Markdown context assembly with SQLite FTS fallback.
 
 `wiki-agent` owns:
 
@@ -130,6 +129,9 @@ Implemented endpoints include:
 - `GET /api/pages/:id/backlinks`
 - `GET /api/pages/:id/outgoing`
 - `GET /api/search`
+- `GET /api/index/status`
+- `POST /api/index/rebuild`
+- `POST /api/rag`
 - `GET /api/graph`
 - `POST /api/links`
 - `POST /api/notes`
@@ -149,6 +151,8 @@ Implemented stdio tools:
 - `wiki_search`
 - `wiki_get_page`
 - `wiki_graph_query`
+- `wiki_rag_query`
+- `wiki_rebuild_index`
 - `wiki_add_note`
 - `wiki_append_page`
 - `wiki_link_pages`
@@ -156,9 +160,9 @@ Implemented stdio tools:
 
 ## Data Ownership
 
-SQLite is durable. Qdrant is derived and not implemented yet.
+SQLite is durable. Qdrant is derived and rebuildable.
 
-Contributor agents should not run manual database operations or migrations unless the owner asks. Test suites may use in-memory SQLite. Never run database operations against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
+Contributor agents may run database operations and migrations against local/dev databases. Test suites may use in-memory SQLite. Never run database operations against remote, shared, staging, or production databases unless the owner explicitly says so for that target.
 
 Runtime data should live outside tracked source under `~/.personal-wiki`:
 
@@ -172,6 +176,8 @@ Runtime data should live outside tracked source under `~/.personal-wiki`:
   logs/
   backups/
 ```
+
+OpenAI, embedding, and Qdrant settings live in `~/.personal-wiki/config.json`. Do not read these settings from environment variables. Do not commit this config because it can contain secrets.
 
 All local runtime data paths should be ignored by Git.
 
