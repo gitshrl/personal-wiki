@@ -155,16 +155,44 @@ mcp_audit_log
   arguments_json text not null
   result_summary text
   created_at text not null
+
+entities
+  id text primary key
+  kind text not null
+  title text not null
+  slug text not null
+  summary text
+  created_at text not null
+  updated_at text not null
+  metadata_json text not null default '{}'
+
+entity_mentions
+  id text primary key
+  page_id text not null
+  entity_id text not null
+  source_text text not null
+  created_at text not null
+
+entity_links
+  id text primary key
+  from_entity_id text not null
+  to_entity_id text not null
+  origin text not null
+  source_page_id text
+  created_at text not null
 ```
 
 ## Notes
 
 - `pages.kind` is a normalized, user/domain-defined slug.
+- `entities.kind` is also a normalized, user/domain-defined slug.
 - Do not enforce a fixed kind enum in SQLite.
-- New domains can add kinds such as `chat`, `trade`, `paper`, `company`, or `project` without migrations.
+- New domains can add page or entity kinds such as `trade`, `paper`, `company`, `person`, `protocol`, or `project` without migrations.
 - `links.origin` starts with `wikilink`, `manual`, `proposal`, or `system`.
-- Keep links semantically plain in the core graph.
-- If relation types are needed, add them after real usage proves it.
+- The graph API is a derived heterogeneous view, not a separate source of truth.
+- Graph node kinds are stable: `page`, `entity`, `agent`, and `resource`.
+- There is no dedicated `chat` graph node. A conversation can become a note page if worth preserving.
+- Keep stored links semantically plain. Derived graph edges can expose `links_to`, `mentions`, `represents`, `created_by`, `sourced_from`, and `co_mentioned_with`.
 - `page_aliases` resolves renamed pages and `[[Title]]` variants.
 - `page_revisions` supports audit and rollback.
 - SQLite FTS5 should power exact and keyword search.

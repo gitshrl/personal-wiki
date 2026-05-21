@@ -16,34 +16,36 @@ Initial complement plan: https://gist.github.com/gitshrl/31efda23ceef34802b79614
 
 ## Core Model
 
-Every entity is a page.
+Pages are durable wiki artifacts. Entities are separate graph nodes derived from typed wikilinks, explicit page metadata, and page content. A page can represent an entity, but entities do not have to be pages.
 
-Page kinds are user and domain defined.
+Page kinds and entity kinds are user and domain defined.
 
 Examples:
 
 - `topic`
 - `note`
-- `chat`
 - `source`
 - `person`
 - `agent`
 - `company`
 - `project`
 
-Do not hardcode entity groups in UI, graph, MCP, or storage. The sidebar and graph legend should grow from the `kind` values already stored in SQLite.
+Do not hardcode entity groups in UI, graph, MCP, or storage. The sidebar should grow from stored page kinds. The graph legend should grow from graph node kinds and subtypes.
 
 ## Graph Rules
 
-Pages connect through `[[wikilinks]]` inside page bodies.
+Pages connect through `[[wikilinks]]` inside page bodies. Typed wikilinks such as `[[person:Ada Lovelace]]` create entity mentions.
 
-Backlinks are derived automatically. Outgoing links come from wikilinks and optional explicit links.
+Backlinks are derived automatically. Outgoing links come from wikilinks and optional explicit links. Backlinks are not stored as separate rows.
 
-Keep edges plain for the core graph:
+Keep stored page links plain. The derived heterogeneous graph exposes stable edge kinds:
 
-- No edge type.
-- No edge confidence.
-- No separate backlink records.
+- `links_to`
+- `mentions`
+- `represents`
+- `created_by`
+- `sourced_from`
+- `co_mentioned_with`
 
 The graph should compound as agents add better links over time.
 
@@ -100,11 +102,16 @@ Agents may run database operations and migrations against local/dev databases. T
 
 ## MCP Direction
 
+Current MCP resources:
+
+- `wiki://recent`
+- `wiki://page/{id}`
+
 Expose the wiki through MCP using:
 
-- Resources for pages, backlinks, graph neighborhoods, proposals, and recent notes.
-- Tools for search, graph query, RAG query, capture, add note, append page, link pages, and proposed or trusted writes.
-- Prompts for memory sourcing, session summaries, source ingestion, and graph audits.
+- Current tools for search, page reads, graph query, RAG query, add note, append page, link pages, runtime info, and index rebuild.
+- Remaining this-phase resources for backlinks, graph neighborhoods, proposals, captures, and agent notes.
+- Remaining this-phase prompts for memory sourcing, session summaries, source ingestion, and graph audits.
 
 Start with stdio MCP. Add Streamable HTTP only after auth and Origin validation are in place.
 
@@ -122,10 +129,10 @@ Build the real UI with Next.js.
 
 Important UI surfaces:
 
-- Home with recent pages and linked pages.
+- Home with recent pages.
 - Sidebar with recent pages and data-driven groups.
-- Entity page with title, metadata, body, backlinks, and outgoing links.
-- Graph view with pan, zoom, node focus, and click-to-open.
+- Page view with title, metadata, body, related pages, and an icon-only graph neighborhood action.
+- Graph view with Cytoscape.js pan, zoom, draggable nodes, node focus, and click-to-open.
 - Search or ask box for direct navigation and memory queries.
 - Proposal review and capture inbox for agent-written memory.
 
@@ -147,7 +154,7 @@ Competitive research and moat plan:
 
 `.agents/plans/10_competitive_research_and_moat.md`
 
-Keep future plans specific, dated, and tied to implementation phases.
+Keep new plans specific, dated, and tied to this-phase implementation work.
 
 ## Current Implementation
 
@@ -165,7 +172,7 @@ pnpm dev:mcp
 
 Implemented packages:
 
-- `apps/web`: Next.js 16 UI shell from the persona-wiki design.
+- `apps/web`: Next.js 16 UI shell from the persona-wiki design, using Cytoscape.js for the graph.
 - `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, runtime info, index rebuild, and RAG.
 - `apps/mcp`: stdio MCP server with read, write, graph, RAG, and index rebuild tools.
 - `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.

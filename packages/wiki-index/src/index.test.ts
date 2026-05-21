@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createPage } from "@personal-wiki/wiki-core";
 import { createWikiRepository, openWikiDatabase } from "@personal-wiki/wiki-db";
@@ -7,8 +10,8 @@ import {
   defaultEmbeddingConfig,
   getWikiIndexConfig,
   indexWikiPages,
-  qdrantPointIdForChunk,
   queryWikiRag,
+  readPersonalWikiConfig,
   searchWikiSemantic,
   type EmbeddingProvider,
   type QdrantPoint,
@@ -66,6 +69,23 @@ describe("wiki-index", () => {
 
     expect(config.embedding.apiKey).toBe("from-config");
     expect(config.qdrant.url).toBe("http://127.0.0.1:6333");
+  });
+
+  it("rejects invalid persisted index config", () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "personal-wiki-config-"));
+
+    try {
+      writeFileSync(
+        join(homeDir, "config.json"),
+        JSON.stringify({ qdrant: { distance: "BadDistance" } })
+      );
+
+      expect(() =>
+        readPersonalWikiConfig({ PERSONAL_WIKI_HOME: homeDir } as NodeJS.ProcessEnv)
+      ).toThrow("qdrant.distance must be Cosine, Dot, Euclid, or Manhattan");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("indexes pages into Qdrant and returns semantic Markdown context", async () => {
@@ -155,6 +175,26 @@ describe("wiki-index", () => {
 
       expect(rag.mode).toBe("fts");
       expect(rag.markdown).toContain("SQLite fallback");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails targeted rebuilds when a requested page is missing", async () => {
+    const { db, repo } = createRepository();
+
+    try {
+      await expect(
+        indexWikiPages(repo, {
+          pageIds: ["missing-page"],
+          config: getWikiIndexConfig(
+            { PERSONAL_WIKI_HOME: "/tmp/wiki-test" } as NodeJS.ProcessEnv,
+            { openai: { apiKey: "test-key" } }
+          ),
+          embeddingProvider: new FakeEmbeddingProvider(),
+          qdrant: new FakeQdrantStore()
+        })
+      ).rejects.toThrow("Page not found for indexing: missing-page");
     } finally {
       db.close();
     }

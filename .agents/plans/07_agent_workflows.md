@@ -22,11 +22,11 @@ Recommended defaults:
 - Loka: `propose_only`, maybe `trusted_write` for maintenance after review
 - Unknown clients: `read_only`
 
-Direct writes currently create page revisions and enqueue index jobs when page content changes. `mcp_audit_log` is in the schema plan, but tool-call logging is not implemented yet.
+Direct writes currently create page revisions and enqueue index jobs when page content changes. `mcp_audit_log` is in the schema plan; tool-call logging remains this-phase work.
 
 ## Add Note Flow
 
-Use this when a chat produces a durable insight, decision, task, or useful synthesis.
+Use this when a conversation produces a durable insight, decision, task, or useful synthesis.
 
 1. Agent calls `wiki_add_note` or `wiki_append_page`.
 2. Server resolves target pages and wikilinks.
@@ -56,7 +56,7 @@ Good behavior:
 ## Session Summary Writeback
 
 1. Agent finishes a task.
-2. Agent calls `wiki_add_note`, `wiki_append_note`, or `wiki_propose_changes`.
+2. Agent calls `wiki_add_note`, `wiki_append_page`, or the proposal workflow.
 3. Proposal includes a short title, source session ID, and grouped changes.
 4. Proposed body text uses `[[wikilinks]]`.
 5. UI shows diff-style review.

@@ -68,8 +68,16 @@ describe("wiki MCP tool actions", () => {
       expect(result.page?.id).toBe("note-direct-note");
       expect(result.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
-      const graph = queryWikiGraph(context, { focusPageId: "note-direct-note" });
+      const graph = queryWikiGraph(context, { focusId: "Personal wiki" });
+      expect(graph.nodes.map((node) => node.id)).toContain("page:topic-personal-wiki");
+      expect(graph.nodes.map((node) => node.id)).toContain("page:note-direct-note");
+      expect(graph.entities.map((entity) => entity.title)).toContain("Personal wiki");
       expect(graph.pages.map((page) => page.id)).toContain("topic-personal-wiki");
+      expect(graph.pages.map((page) => page.id)).toContain("note-direct-note");
+
+      const pageGraph = queryWikiGraph(context, { focusPageId: "note-direct-note" });
+      expect(pageGraph.nodes.map((node) => node.id)).toContain("page:note-direct-note");
+      expect(pageGraph.nodes.map((node) => node.id)).toContain("page:topic-personal-wiki");
 
       const search = searchWiki(context, { q: "Direct" });
       expect(search.pages.map((page) => page.id)).toContain("note-direct-note");
@@ -83,16 +91,16 @@ describe("wiki MCP tool actions", () => {
 
     try {
       const result = addWikiNote(context, {
-        title: "Agent chat",
-        body: "A chat can be its own kind.",
+        title: "Agent note",
+        body: "A note can use a domain-specific kind.",
         agentId: "codex",
-        kind: "chat",
+        kind: "research note",
         mode: "direct"
       });
 
       expect(result.page).toMatchObject({
-        id: "chat-agent-chat",
-        kind: "chat"
+        id: "research-note-agent-note",
+        kind: "research-note"
       });
     } finally {
       close();

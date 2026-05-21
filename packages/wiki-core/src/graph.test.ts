@@ -18,11 +18,11 @@ describe("graph", () => {
   const graph: PageGraph = { pages: [mcp, wiki, memory, note], links };
 
   it("supports user-defined page kinds", () => {
-    const chat = createPage({ kind: "chat session", title: "Planning chat" }, now);
+    const researchNote = createPage({ kind: "research note", title: "Planning note" }, now);
 
-    expect(chat).toMatchObject({
-      id: "chat-session-planning-chat",
-      kind: "chat-session"
+    expect(researchNote).toMatchObject({
+      id: "research-note-planning-note",
+      kind: "research-note"
     });
   });
 

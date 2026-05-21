@@ -1,16 +1,15 @@
-import {
-  normalizeTitle,
-  renderPageMarkdown,
-  slugify,
-  type PageGraph,
-  type WikiPage
-} from "@personal-wiki/wiki-core";
+import { renderPageMarkdown, type WikiPage } from "@personal-wiki/wiki-core";
 import {
   buildAddNoteProposal,
   noteInputToPage,
   type AddNoteInput
 } from "@personal-wiki/wiki-agent";
-import type { WikiProposal, WikiRepository } from "@personal-wiki/wiki-db";
+import {
+  resolveGraphFocusNode,
+  resolvePageReference,
+  type WikiProposal,
+  type WikiRepository
+} from "@personal-wiki/wiki-db";
 import {
   getWikiIndexConfig,
   indexWikiPages,
@@ -39,6 +38,9 @@ export interface WikiGetPageInput {
 }
 
 export interface WikiGraphQueryInput {
+  focusNodeId?: string | undefined;
+  focusEntityId?: string | undefined;
+  focusId?: string | undefined;
   focusPageId?: string | undefined;
   depth?: number | undefined;
   limit?: number | undefined;
@@ -207,25 +209,23 @@ export function linkWikiPages(context: WikiToolContext, input: WikiLinkPagesInpu
   return { mode: "propose" as const, proposal };
 }
 
-export function queryWikiGraph(context: WikiToolContext, input: WikiGraphQueryInput): PageGraph {
-  if (!input.focusPageId) {
-    return context.repo.getGraph();
+export function queryWikiGraph(context: WikiToolContext, input: WikiGraphQueryInput) {
+  const graph = context.repo.getKnowledgeGraph();
+  const node = resolveGraphFocusNode(context.repo, graph, input);
+  if (!node) {
+    return graph;
   }
 
-  const page = getPageByReference(context.repo, input.focusPageId);
-  const neighborhood = context.repo.getPageNeighborhood(page.id, {
+  const neighborhood = context.repo.getKnowledgeGraphNeighborhood(node.id, {
     depth: normalizeLimit(input.depth ?? 1, 4),
     limit: normalizeLimit(input.limit ?? 100, 500)
   });
 
   if (!neighborhood) {
-    throw new Error(`Graph focus not found: ${input.focusPageId}`);
+    throw new Error(`Graph focus not found: ${node.id}`);
   }
 
-  return {
-    pages: neighborhood.pages,
-    links: neighborhood.links
-  };
+  return neighborhood;
 }
 
 export async function queryWikiRag(
@@ -266,11 +266,7 @@ export function listRecentWikiPages(context: WikiToolContext, limit = 20) {
 }
 
 export function getPageByReference(repo: WikiRepository, reference: string): WikiPage {
-  const value = decodeURIComponent(reference).trim();
-  const page =
-    repo.getPage(value) ??
-    repo.getPageBySlug(slugify(value)) ??
-    repo.listPages().find((candidate) => normalizeTitle(candidate.title) === normalizeTitle(value));
+  const page = resolvePageReference(repo, reference);
 
   if (!page) {
     throw new Error(`Page not found: ${reference}`);

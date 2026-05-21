@@ -30,15 +30,41 @@ On every page save:
 2. Resolve wikilinks.
 3. Replace old `origin = wikilink` links for that page.
 4. Insert new `origin = wikilink` links.
-5. Keep manual links untouched.
-6. Enqueue index job.
+5. Extract typed entity mentions such as `[[person:Ada Lovelace]]`.
+6. Replace derived page-to-entity mention edges for that page.
+7. Derive entity-to-entity co-mention edges for entities mentioned in the same page.
+8. Keep manual page links untouched.
+9. Enqueue index job.
 
 Backlinks are not stored as separate rows. They are queries over `links`.
+
+## Graph Model
+
+The graph is heterogeneous. It is not page-only and not entity-only.
+
+Node kinds:
+
+- `page`: durable wiki artifacts such as notes, articles, plans, decisions, and sources.
+- `entity`: domain objects such as people, organizations, projects, concepts, protocols, or anything user-defined.
+- `agent`: provenance node for trusted writers.
+- `resource`: URL, file, upload, or source material.
+
+There is no dedicated `chat` node. A useful conversation can become a concise note page, but raw conversation state is not a graph primitive.
+
+Edge kinds:
+
+- `links_to`: page to page, from manual links or resolved wikilinks.
+- `mentions`: page to entity, derived from typed or plain wikilinks.
+- `represents`: page to entity when a page is the canonical article for an entity.
+- `created_by`: page to agent.
+- `sourced_from`: page to resource.
+- `co_mentioned_with`: entity to entity, derived from shared page mentions.
 
 ## Graph Query
 
 Core graph queries:
 
+- `graph_neighborhood(node_id, depth, node_kinds, limit)`
 - `page_neighborhood(page_id, depth, kinds, limit)`
 - `backlinks(page_id)`
 - `outgoing(page_id)`
@@ -48,7 +74,7 @@ Core graph queries:
 - `duplicate_candidates()`
 - `recently_connected(limit)`
 
-Use SQLite recursive CTEs for traversal. A graph database is not needed for the core product.
+Use SQLite tables as source of truth and assemble a graph view in the repository/API layer. Recursive traversal can run over SQLite page links or over the assembled heterogeneous graph. A graph database is not needed for the core product.
 
 Light graph strategy:
 
@@ -58,7 +84,7 @@ optional derived index: Kuzu, only if traversal pressure appears
 out of scope: Neo4j, unless graph analytics becomes the product
 ```
 
-SQLite stays the source of truth even if a graph engine is added. Any graph engine should be rebuildable from `pages` and `links`.
+SQLite stays the source of truth even if a graph engine is added. Any graph engine should be rebuildable from `pages`, `links`, `entities`, `entity_mentions`, and `entity_links`.
 
 ## Search Layers
 
@@ -67,7 +93,8 @@ Current implementation:
 - `wiki_search` uses SQLite FTS5 when a query exists.
 - Empty search returns recent pages from SQLite.
 - Page reads return Markdown by default through MCP.
-- Graph reads use SQLite links and recursive traversal.
+- Graph reads return heterogeneous `nodes` and `edges`.
+- Page links, entity mentions, entity links, agents, and resources are exposed as one graph view.
 - `wiki_rebuild_index` chunks pages, calls OpenAI embeddings, and upserts Qdrant points.
 - `wiki_rag_query` returns agent-readable Markdown context.
 - `/api/index/rebuild` and `/api/rag` expose the same flow over HTTP.
@@ -99,13 +126,13 @@ Current `wiki_rag_query` flow:
 6. Render Markdown context with matched snippets, page frontmatter, body, backlinks, and outgoing links.
 7. Fall back to SQLite FTS when semantic search cannot run.
 
-The current implementation returns full selected page Markdown because the agent-facing read path should be useful immediately. Tune this later if context gets too large.
+The current implementation returns full selected page Markdown because the agent-facing read path should be useful immediately. Tune it when context gets too large.
 
 ## Hybrid Search
 
 Qdrant supports hybrid and multi-stage queries with dense and sparse representations. Use that after basic dense search works.
 
-Suggested phases:
+This-phase search work:
 
 1. SQLite FTS5 only. Done.
 2. Qdrant dense vectors with `text-embedding-3-small`. Done.

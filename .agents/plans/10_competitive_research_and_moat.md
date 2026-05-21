@@ -53,7 +53,7 @@ Each accepted note should improve at least one of these:
 - An outgoing link.
 - A source trail.
 - A graph neighborhood.
-- A future retrieval result.
+- A retrieval result.
 
 Memory is just one way agents access this compounding wiki.
 
@@ -61,7 +61,7 @@ Memory is just one way agents access this compounding wiki.
 
 The UI is the wedge.
 
-The wiki should feel better than reading raw Markdown, Obsidian search results, or memory cards. Entity pages, backlinks, outgoing links, graph neighborhoods, source metadata, proposals, and agent notes should all feel like one product.
+The wiki should feel better than reading raw Markdown, Obsidian search results, or memory cards. Page views, entities, related pages, graph neighborhoods, source metadata, proposals, and agent notes should all feel like one product.
 
 ### 3. Agent-Written Pages, Not Opaque Memories
 
@@ -90,7 +90,7 @@ JSON remains available for graph queries and structured tool responses.
 
 SQLite makes the product inspectable, local, and durable.
 
-Qdrant and any future graph index must be rebuildable. This keeps the system from becoming an opaque memory service.
+Qdrant and any derived graph index must be rebuildable. This keeps the system from becoming an opaque memory service.
 
 All local runtime state should live under `~/.personal-wiki`, including SQLite, resources, uploads, Qdrant storage, logs, and backups. The repository stays portable and source-only.
 
@@ -114,7 +114,7 @@ Build these with extra care:
 - Markdown resource output for agents.
 - Proposal review.
 - Provenance display.
-- Backlinks and outgoing links.
+- Related pages and graph neighborhoods.
 - Search-to-page flow.
 - Agent note style.
 - Local data ownership.
@@ -123,7 +123,7 @@ Avoid spending moat energy on:
 
 - Custom vector infrastructure.
 - Complex graph engines.
-- Generic chat UI.
+- Generic assistant UI.
 - Obsidian compatibility as the main goal.
 - Capture without review.
 

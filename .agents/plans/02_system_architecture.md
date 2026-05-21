@@ -144,7 +144,7 @@ Implemented endpoints include:
 - MCP tool registration.
 - Client capability and transport setup.
 
-MCP prompt registration is planned, not implemented yet.
+MCP prompt registration remains this-phase work.
 
 Implemented stdio tools:
 

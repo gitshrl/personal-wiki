@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createWikiRepository, openWikiDatabase } from "./index";
+import {
+  createWikiRepository,
+  openWikiDatabase,
+  resolveGraphFocusNode,
+  resolvePageReference
+} from "./index";
 import type { WikiDatabase } from "./index";
 
 const now = "2026-05-20T00:00:00.000Z";
@@ -33,21 +38,25 @@ describe("WikiRepository", () => {
 
   it("stores custom page kinds without schema changes", () => {
     withRepository(({ repo }) => {
-      const chat = repo.createPage(
+      const researchNote = repo.createPage(
         {
-          kind: "chat-session",
-          title: "Design chat",
-          body: "A durable chat note."
+          kind: "research note",
+          title: "Design note",
+          body: "A durable note with a custom kind."
         },
         { now }
       );
 
-      expect(chat).toMatchObject({
-        id: "chat-session-design-chat",
-        kind: "chat-session"
+      expect(researchNote).toMatchObject({
+        id: "research-note-design-note",
+        kind: "research-note"
       });
-      expect(repo.listPages({ kind: "chat-session" }).map((page) => page.id)).toEqual([chat.id]);
-      expect(repo.listPages({ kind: "chat session" }).map((page) => page.id)).toEqual([chat.id]);
+      expect(repo.listPages({ kind: "research-note" }).map((page) => page.id)).toEqual([
+        researchNote.id
+      ]);
+      expect(repo.listPages({ kind: "research note" }).map((page) => page.id)).toEqual([
+        researchNote.id
+      ]);
     });
   });
 
@@ -125,6 +134,72 @@ describe("WikiRepository", () => {
           sourceText: "[[AI memory]]"
         })
       ]);
+      expect(resolvePageReference(repo, "AI memory")?.id).toBe(memory.id);
+    });
+  });
+
+  it("derives generic entity nodes and links from page content", () => {
+    withRepository(({ repo }) => {
+      const note = repo.createPage(
+        {
+          kind: "article",
+          title: "Entity note",
+          body: "Connect [[protocol:MCP]] with [[organization:OpenAI]] and [[Personal wiki]]."
+        },
+        { now }
+      );
+
+      const graph = repo.getEntityGraph();
+      const knowledgeGraph = repo.getKnowledgeGraph();
+      expect(graph.entities).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "protocol", title: "MCP" }),
+          expect.objectContaining({ kind: "organization", title: "OpenAI" }),
+          expect.objectContaining({ kind: "entity", title: "Personal wiki" })
+        ])
+      );
+      expect(graph.mentions.map((mention) => mention.pageId)).toEqual([note.id, note.id, note.id]);
+      expect(graph.links).toHaveLength(3);
+      expect(knowledgeGraph.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: `page:${note.id}`, kind: "page", title: "Entity note" }),
+          expect.objectContaining({ kind: "entity", subtype: "protocol", title: "MCP" }),
+          expect.objectContaining({ kind: "entity", subtype: "organization", title: "OpenAI" })
+        ])
+      );
+      expect(knowledgeGraph.edges.map((edge) => edge.kind).sort()).toEqual([
+        "co_mentioned_with",
+        "co_mentioned_with",
+        "co_mentioned_with",
+        "mentions",
+        "mentions",
+        "mentions"
+      ]);
+      expect(resolveGraphFocusNode(repo, knowledgeGraph, { focusPageId: note.id })).toMatchObject({
+        id: `page:${note.id}`,
+        kind: "page"
+      });
+
+      const openAiEntity = graph.entities.find((entity) => entity.title === "OpenAI");
+      expect(openAiEntity).toBeDefined();
+      expect(
+        resolveGraphFocusNode(repo, knowledgeGraph, { focusEntityId: openAiEntity?.id })
+      ).toMatchObject({
+        kind: "entity",
+        title: "OpenAI"
+      });
+
+      repo.updatePage(
+        note.id,
+        { body: "Keep [[protocol:MCP]] connected to [[Personal wiki]]." },
+        { now: "2026-05-20T00:01:00.000Z" }
+      );
+
+      const nextGraph = repo.getEntityGraph();
+      expect(nextGraph.entities).toEqual(
+        expect.not.arrayContaining([expect.objectContaining({ title: "OpenAI" })])
+      );
+      expect(nextGraph.links).toHaveLength(1);
     });
   });
 

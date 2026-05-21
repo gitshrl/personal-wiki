@@ -2,8 +2,14 @@ import {
   assertPageKind,
   buildPageResolver,
   createAliasId,
+  createEntityId,
+  createEntityLinkId,
+  createEntityMentionId,
+  createGraphEdgeId,
+  createGraphNodeId,
   createLinkId,
   createPage as createCorePage,
+  normalizeEntityKind,
   normalizeTitle,
   normalizePageKind,
   parseWikilinks,
@@ -13,6 +19,15 @@ import {
 } from "@personal-wiki/wiki-core";
 import type {
   CreatePageInput,
+  EntityGraph,
+  EntityLink,
+  EntityLinkOrigin,
+  EntityMention,
+  EntityNeighborhood,
+  GraphEdge,
+  GraphNode,
+  KnowledgeGraph,
+  KnowledgeGraphNeighborhood,
   LinkOrigin,
   PageAlias,
   PageGraph,
@@ -20,6 +35,7 @@ import type {
   PageNeighborhood,
   PageStatus,
   PageWithLinks,
+  WikiEntity,
   WikiLink,
   WikiPage
 } from "@personal-wiki/wiki-core";
@@ -167,6 +183,25 @@ export interface GraphNeighborhoodOptions {
   limit?: number | undefined;
 }
 
+export interface EntityGraphNeighborhoodOptions {
+  depth?: number | undefined;
+  kinds?: string[] | undefined;
+  limit?: number | undefined;
+}
+
+export interface KnowledgeGraphNeighborhoodOptions {
+  depth?: number | undefined;
+  nodeKinds?: string[] | undefined;
+  limit?: number | undefined;
+}
+
+export interface GraphFocusReference {
+  focusNodeId?: string | undefined;
+  focusPageId?: string | undefined;
+  focusEntityId?: string | undefined;
+  focusId?: string | undefined;
+}
+
 export interface FindPathsOptions {
   maxDepth?: number | undefined;
   limit?: number | undefined;
@@ -233,6 +268,34 @@ interface LinkRow {
   created_at: string;
 }
 
+interface EntityRow {
+  id: string;
+  kind: string;
+  title: string;
+  slug: string;
+  summary: string | null;
+  created_at: string;
+  updated_at: string;
+  metadata_json: string;
+}
+
+interface EntityMentionRow {
+  id: string;
+  page_id: string;
+  entity_id: string;
+  source_text: string;
+  created_at: string;
+}
+
+interface EntityLinkRow {
+  id: string;
+  from_entity_id: string;
+  to_entity_id: string;
+  origin: string;
+  source_page_id: string | null;
+  created_at: string;
+}
+
 interface ProposalRow {
   id: string;
   title: string;
@@ -281,6 +344,7 @@ interface IdRow {
 
 const pageStatuses = new Set<string>(["active", "archived", "draft"]);
 const linkOrigins = new Set<string>(["wikilink", "manual", "proposal", "system"]);
+const entityLinkOrigins = new Set<string>(["co-mention", "manual", "page-title", "system"]);
 const proposalStatuses = new Set<string>(["pending", "accepted", "rejected", "applied"]);
 const indexJobStatuses = new Set<string>(["pending", "running", "done", "failed"]);
 
@@ -348,6 +412,7 @@ export class WikiRepository {
 
       if (options.updateWikilinks ?? true) {
         this.replaceWikilinksForPage(normalizedPage, now);
+        this.replaceEntityMentionsForPage(normalizedPage, now);
       }
     });
 
@@ -517,6 +582,9 @@ export class WikiRepository {
     };
 
     this.upsertLinkRow(link);
+    if (link.origin === "manual") {
+      this.syncManualEntityLink(link, now);
+    }
     return link;
   }
 
@@ -554,7 +622,112 @@ export class WikiRepository {
   }
 
   removeLink(id: string): void {
+    const link = this.getLink(id);
     this.db.prepare("DELETE FROM links WHERE id = ?").run(id);
+    if (link?.origin === "manual") {
+      const page = this.getPage(link.fromPageId);
+      if (page) {
+        this.replaceEntityMentionsForPage(page, new Date().toISOString());
+      }
+    }
+  }
+
+  getEntity(id: string): WikiEntity | null {
+    const row = this.db.prepare("SELECT * FROM entities WHERE id = ?").get(id) as
+      | EntityRow
+      | undefined;
+    return row ? rowToEntity(row) : null;
+  }
+
+  getEntityByKindSlug(kind: string, slug: string): WikiEntity | null {
+    const row = this.db
+      .prepare("SELECT * FROM entities WHERE kind = ? AND slug = ?")
+      .get(normalizeEntityKind(kind), slugify(slug)) as EntityRow | undefined;
+    return row ? rowToEntity(row) : null;
+  }
+
+  listEntities(
+    options: { kind?: string | undefined; limit?: number | undefined } = {}
+  ): WikiEntity[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (options.kind) {
+      conditions.push("kind = @kind");
+      params.kind = normalizeEntityKind(options.kind);
+    }
+
+    let sql = "SELECT * FROM entities";
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " ORDER BY updated_at DESC, title ASC";
+
+    if (options.limit !== undefined) {
+      sql += " LIMIT @limit";
+      params.limit = normalizeLimit(options.limit);
+    }
+
+    return (this.db.prepare(sql).all(params) as EntityRow[]).map(rowToEntity);
+  }
+
+  listEntityMentions(
+    options: { pageId?: string | undefined; entityId?: string | undefined } = {}
+  ): EntityMention[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (options.pageId) {
+      conditions.push("page_id = @pageId");
+      params.pageId = options.pageId;
+    }
+
+    if (options.entityId) {
+      conditions.push("entity_id = @entityId");
+      params.entityId = options.entityId;
+    }
+
+    let sql = "SELECT * FROM entity_mentions";
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " ORDER BY created_at ASC, id ASC";
+
+    return (this.db.prepare(sql).all(params) as EntityMentionRow[]).map(rowToEntityMention);
+  }
+
+  listEntityLinks(
+    options: {
+      fromEntityId?: string | undefined;
+      toEntityId?: string | undefined;
+      origin?: EntityLinkOrigin | undefined;
+    } = {}
+  ): EntityLink[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (options.fromEntityId) {
+      conditions.push("from_entity_id = @fromEntityId");
+      params.fromEntityId = options.fromEntityId;
+    }
+
+    if (options.toEntityId) {
+      conditions.push("to_entity_id = @toEntityId");
+      params.toEntityId = options.toEntityId;
+    }
+
+    if (options.origin) {
+      conditions.push("origin = @origin");
+      params.origin = options.origin;
+    }
+
+    let sql = "SELECT * FROM entity_links";
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    sql += " ORDER BY created_at ASC, id ASC";
+
+    return (this.db.prepare(sql).all(params) as EntityLinkRow[]).map(rowToEntityLink);
   }
 
   createProposal(input: CreateProposalInput): WikiProposal {
@@ -793,6 +966,130 @@ export class WikiRepository {
       pages: this.listPages(),
       links: this.listLinks()
     };
+  }
+
+  getEntityGraph(): EntityGraph {
+    return {
+      entities: this.listEntities(),
+      links: this.listEntityLinks(),
+      mentions: this.listEntityMentions(),
+      pages: this.listPages()
+    };
+  }
+
+  getKnowledgeGraph(): KnowledgeGraph {
+    return buildKnowledgeGraph({
+      pages: this.listPages(),
+      pageLinks: this.listLinks(),
+      entities: this.listEntities(),
+      entityLinks: this.listEntityLinks(),
+      mentions: this.listEntityMentions()
+    });
+  }
+
+  getKnowledgeGraphNeighborhood(
+    nodeId: string,
+    options: KnowledgeGraphNeighborhoodOptions = {}
+  ): KnowledgeGraphNeighborhood | null {
+    const graph = this.getKnowledgeGraph();
+    const center = graph.nodes.find((node) => node.id === nodeId);
+    if (!center) return null;
+
+    const depth = Math.max(0, Math.floor(options.depth ?? 1));
+    const limit = normalizeLimit(options.limit ?? 100);
+    const allowedKinds = new Set(options.nodeKinds ?? []);
+    const selectedIds = traverseGraph(graph, nodeId, depth, limit);
+    const filteredIds = new Set(
+      [...selectedIds].filter((id) => {
+        if (id === nodeId || allowedKinds.size === 0) return true;
+        const node = graph.nodes.find((candidate) => candidate.id === id);
+        return node ? allowedKinds.has(node.kind) : false;
+      })
+    );
+
+    return filterKnowledgeGraph(graph, center, filteredIds);
+  }
+
+  rebuildEntityGraph(now = new Date().toISOString()): EntityGraph {
+    const pages = this.listPages();
+    const rebuild = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM entity_links").run();
+      this.db.prepare("DELETE FROM entity_mentions").run();
+      this.db.prepare("DELETE FROM entities").run();
+
+      for (const page of pages) {
+        this.replaceEntityMentionsForPage(page, now);
+      }
+    });
+
+    rebuild();
+    return this.getEntityGraph();
+  }
+
+  rebuildDerivedGraph(now = new Date().toISOString()): KnowledgeGraph {
+    this.rebuildEntityGraph(now);
+    return this.getKnowledgeGraph();
+  }
+
+  getEntityNeighborhood(
+    entityId: string,
+    options: EntityGraphNeighborhoodOptions = {}
+  ): EntityNeighborhood | null {
+    const depth = Math.max(0, Math.floor(options.depth ?? 1));
+    const limit = normalizeLimit(options.limit ?? 100);
+    const center = this.getEntity(entityId);
+    if (!center) return null;
+
+    const rows = this.db
+      .prepare(
+        `
+          WITH RECURSIVE frontier(id, depth, path) AS (
+            SELECT @entityId, 0, @entityId
+            UNION ALL
+            SELECT
+              CASE
+                WHEN l.from_entity_id = frontier.id THEN l.to_entity_id
+                ELSE l.from_entity_id
+              END,
+              frontier.depth + 1,
+              frontier.path || ',' ||
+                CASE
+                  WHEN l.from_entity_id = frontier.id THEN l.to_entity_id
+                  ELSE l.from_entity_id
+                END
+            FROM frontier
+            JOIN entity_links l
+              ON l.from_entity_id = frontier.id OR l.to_entity_id = frontier.id
+            WHERE frontier.depth < @depth
+              AND instr(
+                ',' || frontier.path || ',',
+                ',' ||
+                  CASE
+                    WHEN l.from_entity_id = frontier.id THEN l.to_entity_id
+                    ELSE l.from_entity_id
+                  END ||
+                ','
+              ) = 0
+          )
+          SELECT DISTINCT id FROM frontier
+          LIMIT @limit
+        `
+      )
+      .all({ entityId, depth, limit }) as IdRow[];
+
+    const entityIds = rows.map((row) => row.id);
+    const allowedKinds = new Set((options.kinds ?? []).map((kind) => normalizeEntityKind(kind)));
+    const entities =
+      allowedKinds.size === 0
+        ? this.getEntitiesByIds(entityIds)
+        : this.getEntitiesByIds(entityIds).filter(
+            (entity) => entity.id === entityId || allowedKinds.has(entity.kind)
+          );
+    const links = this.getLinksBetweenEntityIds(entities.map((entity) => entity.id));
+    const mentions = this.getMentionsForEntityIds(entities.map((entity) => entity.id));
+    const pages = this.getPagesByIds([...new Set(mentions.map((mention) => mention.pageId))]);
+
+    return { center, entities, links, mentions, pages };
   }
 
   getBacklinks(pageId: string): WikiPage[] {
@@ -1337,6 +1634,348 @@ export class WikiRepository {
     }
   }
 
+  private replaceEntityMentionsForPage(page: WikiPage, now: string): void {
+    const mentions = this.deriveEntityMentionsForPage(page, now);
+    const entityIds = [...new Set(mentions.map((mention) => mention.entityId))];
+
+    this.db.prepare("DELETE FROM entity_mentions WHERE page_id = ?").run(page.id);
+    this.db
+      .prepare(
+        "DELETE FROM entity_links WHERE source_page_id = ? AND origin IN ('co-mention', 'manual', 'page-title')"
+      )
+      .run(page.id);
+
+    for (const mention of mentions) {
+      this.upsertEntityMentionRow(mention);
+    }
+
+    for (let leftIndex = 0; leftIndex < entityIds.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < entityIds.length; rightIndex += 1) {
+        const left = entityIds[leftIndex];
+        const right = entityIds[rightIndex];
+        if (!left || !right || left === right) continue;
+        this.upsertEntityLinkRow(createEntityLink(left, right, "co-mention", now, page.id));
+      }
+    }
+
+    this.replaceManualEntityLinksForPage(page, now);
+    this.deleteUnusedEntities();
+  }
+
+  private deriveEntityMentionsForPage(page: WikiPage, now: string): EntityMention[] {
+    const mentions: EntityMention[] = [];
+    const seen = new Set<string>();
+    const pages = this.listPages();
+    const resolvePage = buildPageResolver(pages, this.listAliases());
+    const titleEntity = this.upsertPageEntityIfApplicable(page, now);
+
+    if (titleEntity) {
+      pushMention(mentions, seen, {
+        id: createEntityMentionId(page.id, titleEntity.id, page.title, -1),
+        pageId: page.id,
+        entityId: titleEntity.id,
+        sourceText: page.title,
+        createdAt: now
+      });
+    }
+
+    for (const link of parseWikilinks(page.body)) {
+      const target = parseEntityTarget(link.target);
+      const resolvedPage = resolvePage(link.target) ?? resolvePage(target.title);
+      const entity = this.upsertEntityFromPageOrTarget(
+        resolvedPage,
+        target.kind,
+        target.title,
+        now
+      );
+      pushMention(mentions, seen, {
+        id: createEntityMentionId(page.id, entity.id, link.raw, link.index),
+        pageId: page.id,
+        entityId: entity.id,
+        sourceText: link.raw,
+        createdAt: now
+      });
+    }
+
+    for (const link of this.listLinks({ fromPageId: page.id, origin: "manual" })) {
+      const linkedPage = this.getPage(link.toPageId);
+      if (!linkedPage) continue;
+      const entity = this.upsertPageEntityIfApplicable(linkedPage, now);
+      if (!entity) continue;
+      pushMention(mentions, seen, {
+        id: createEntityMentionId(page.id, entity.id, link.sourceText ?? linkedPage.title, 0),
+        pageId: page.id,
+        entityId: entity.id,
+        sourceText: link.sourceText ?? linkedPage.title,
+        createdAt: now
+      });
+    }
+
+    return mentions;
+  }
+
+  private upsertEntityFromPageOrTarget(
+    page: WikiPage | null,
+    explicitKind: string | undefined,
+    fallbackTitle: string,
+    now: string
+  ): WikiEntity {
+    if (page) {
+      const pageEntity = this.upsertPageEntityIfApplicable(page, now, explicitKind);
+      if (pageEntity) return pageEntity;
+    }
+
+    return this.upsertEntity({
+      kind: explicitKind ?? pageEntityKind(page) ?? "entity",
+      title: page?.title ?? fallbackTitle,
+      summary: page?.summary,
+      metadata: page ? { pageId: page.id } : {},
+      now
+    });
+  }
+
+  private upsertPageEntityIfApplicable(
+    page: WikiPage,
+    now: string,
+    explicitKind?: string | undefined
+  ): WikiEntity | null {
+    const kind = explicitKind ?? pageEntityKind(page);
+    if (!kind) return null;
+
+    return this.upsertEntity({
+      kind,
+      title: page.title,
+      summary: page.summary,
+      metadata: { pageId: page.id, pageKind: page.kind },
+      now
+    });
+  }
+
+  private upsertEntity(input: {
+    kind: string;
+    title: string;
+    summary?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
+    now: string;
+  }): WikiEntity {
+    const kind = normalizeEntityKind(input.kind);
+    const title = input.title.trim();
+    if (!title) {
+      throw new Error("Entity title is required");
+    }
+    const slug = slugify(title) || shortHash(title);
+    const existing = this.getEntityByKindSlug(kind, slug);
+    const entity: WikiEntity = {
+      id: existing?.id ?? createEntityId(kind, title),
+      kind,
+      title,
+      slug,
+      summary: input.summary ?? existing?.summary,
+      createdAt: existing?.createdAt ?? input.now,
+      updatedAt: input.now,
+      metadata: { ...(existing?.metadata ?? {}), ...(input.metadata ?? {}) }
+    };
+
+    this.upsertEntityRow(entity);
+    return this.getEntity(entity.id) ?? entity;
+  }
+
+  private syncManualEntityLink(link: WikiLink, now: string): void {
+    const fromPage = this.getPage(link.fromPageId);
+
+    if (fromPage) {
+      this.replaceEntityMentionsForPage(fromPage, now);
+    }
+  }
+
+  private replaceManualEntityLinksForPage(page: WikiPage, now: string): void {
+    const fromEntity = this.upsertPageEntityIfApplicable(page, now);
+    if (!fromEntity) return;
+
+    for (const link of this.listLinks({ fromPageId: page.id, origin: "manual" })) {
+      const toPage = this.getPage(link.toPageId);
+      if (!toPage) continue;
+      const toEntity = this.upsertPageEntityIfApplicable(toPage, now);
+      if (!toEntity || fromEntity.id === toEntity.id) continue;
+      this.upsertEntityLinkRow(
+        createEntityLink(fromEntity.id, toEntity.id, "manual", now, page.id)
+      );
+    }
+  }
+
+  private upsertEntityRow(entity: WikiEntity): void {
+    this.db
+      .prepare(
+        `
+          INSERT INTO entities (
+            id,
+            kind,
+            title,
+            slug,
+            summary,
+            created_at,
+            updated_at,
+            metadata_json
+          ) VALUES (
+            @id,
+            @kind,
+            @title,
+            @slug,
+            @summary,
+            @createdAt,
+            @updatedAt,
+            @metadataJson
+          )
+          ON CONFLICT(id) DO UPDATE SET
+            kind = excluded.kind,
+            title = excluded.title,
+            slug = excluded.slug,
+            summary = excluded.summary,
+            updated_at = excluded.updated_at,
+            metadata_json = excluded.metadata_json
+        `
+      )
+      .run({
+        id: entity.id,
+        kind: entity.kind,
+        title: entity.title,
+        slug: entity.slug,
+        summary: entity.summary ?? null,
+        createdAt: entity.createdAt,
+        updatedAt: entity.updatedAt,
+        metadataJson: stringifyObjectJson(entity.metadata)
+      });
+  }
+
+  private upsertEntityMentionRow(mention: EntityMention): void {
+    this.db
+      .prepare(
+        `
+          INSERT INTO entity_mentions (id, page_id, entity_id, source_text, created_at)
+          VALUES (@id, @pageId, @entityId, @sourceText, @createdAt)
+          ON CONFLICT(id) DO UPDATE SET
+            page_id = excluded.page_id,
+            entity_id = excluded.entity_id,
+            source_text = excluded.source_text,
+            created_at = excluded.created_at
+        `
+      )
+      .run({
+        id: mention.id,
+        pageId: mention.pageId,
+        entityId: mention.entityId,
+        sourceText: mention.sourceText,
+        createdAt: mention.createdAt
+      });
+  }
+
+  private upsertEntityLinkRow(link: EntityLink): void {
+    assertEntityLinkOrigin(link.origin);
+
+    this.db
+      .prepare(
+        `
+          INSERT INTO entity_links (
+            id,
+            from_entity_id,
+            to_entity_id,
+            origin,
+            source_page_id,
+            created_at
+          ) VALUES (
+            @id,
+            @fromEntityId,
+            @toEntityId,
+            @origin,
+            @sourcePageId,
+            @createdAt
+          )
+          ON CONFLICT(id) DO UPDATE SET
+            from_entity_id = excluded.from_entity_id,
+            to_entity_id = excluded.to_entity_id,
+            origin = excluded.origin,
+            source_page_id = excluded.source_page_id,
+            created_at = excluded.created_at
+        `
+      )
+      .run({
+        id: link.id,
+        fromEntityId: link.fromEntityId,
+        toEntityId: link.toEntityId,
+        origin: link.origin,
+        sourcePageId: link.sourcePageId ?? null,
+        createdAt: link.createdAt
+      });
+  }
+
+  private getEntitiesByIds(ids: string[]): WikiEntity[] {
+    if (ids.length === 0) return [];
+
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`SELECT * FROM entities WHERE id IN (${placeholders})`)
+      .all(...ids) as EntityRow[];
+    const byId = new Map(rows.map((row) => [row.id, rowToEntity(row)]));
+    const entities: WikiEntity[] = [];
+
+    for (const id of ids) {
+      const entity = byId.get(id);
+      if (entity) entities.push(entity);
+    }
+
+    return entities;
+  }
+
+  private getLinksBetweenEntityIds(entityIds: string[]): EntityLink[] {
+    if (entityIds.length === 0) return [];
+
+    const placeholders = entityIds.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `
+          SELECT *
+          FROM entity_links
+          WHERE from_entity_id IN (${placeholders})
+            AND to_entity_id IN (${placeholders})
+          ORDER BY created_at ASC, id ASC
+        `
+      )
+      .all(...entityIds, ...entityIds) as EntityLinkRow[];
+
+    return rows.map(rowToEntityLink);
+  }
+
+  private getMentionsForEntityIds(entityIds: string[]): EntityMention[] {
+    if (entityIds.length === 0) return [];
+
+    const placeholders = entityIds.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `
+          SELECT *
+          FROM entity_mentions
+          WHERE entity_id IN (${placeholders})
+          ORDER BY created_at ASC, id ASC
+        `
+      )
+      .all(...entityIds) as EntityMentionRow[];
+
+    return rows.map(rowToEntityMention);
+  }
+
+  private deleteUnusedEntities(): void {
+    this.db.exec(`
+      DELETE FROM entities
+      WHERE NOT EXISTS (
+        SELECT 1 FROM entity_mentions m WHERE m.entity_id = entities.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM entity_links l
+        WHERE l.from_entity_id = entities.id OR l.to_entity_id = entities.id
+      );
+    `);
+  }
+
   private getPagesByIds(ids: string[]): WikiPage[] {
     if (ids.length === 0) return [];
 
@@ -1377,6 +2016,119 @@ export class WikiRepository {
 
 export function createWikiRepository(db: WikiDatabase): WikiRepository {
   return new WikiRepository(db);
+}
+
+export function resolvePageReference(repo: WikiRepository, reference: string): WikiPage | null {
+  const value = stripGraphNodePrefix(decodeURIComponent(reference).trim());
+  const direct = repo.getPage(value) ?? repo.getPageBySlug(slugify(value));
+  if (direct) return direct;
+
+  const pageByTitle = repo
+    .listPages()
+    .find((candidate) => normalizeTitle(candidate.title) === normalizeTitle(value));
+  if (pageByTitle) return pageByTitle;
+
+  const alias = repo.getAliasByNormalized(value);
+  return alias ? repo.getPage(alias.pageId) : null;
+}
+
+export function resolveGraphFocusNode(
+  repo: WikiRepository,
+  graph: KnowledgeGraph,
+  input: GraphFocusReference
+): GraphNode | null {
+  if (input.focusNodeId) return resolveGraphNodeReference(repo, graph, input.focusNodeId);
+  if (input.focusPageId) return resolvePageGraphNodeReference(repo, graph, input.focusPageId);
+  if (input.focusEntityId) return resolveEntityGraphNodeReference(graph, input.focusEntityId);
+  if (input.focusId) return resolveGraphNodeReference(repo, graph, input.focusId);
+  return null;
+}
+
+export function resolveGraphNodeReference(
+  repo: WikiRepository,
+  graph: KnowledgeGraph,
+  reference: string
+): GraphNode {
+  const value = decodeURIComponent(reference).trim();
+  const direct = graph.nodes.find((node) => node.id === value);
+  if (direct) return direct;
+
+  const pageNode = findPageGraphNodeReference(repo, graph, value);
+  if (pageNode) return pageNode;
+
+  const entityNode = findEntityGraphNodeReference(graph, value);
+  if (entityNode) return entityNode;
+
+  throw new Error(`Graph node not found: ${reference}`);
+}
+
+export function resolvePageGraphNodeReference(
+  repo: WikiRepository,
+  graph: KnowledgeGraph,
+  reference: string
+): GraphNode {
+  const value = stripGraphNodePrefix(decodeURIComponent(reference).trim());
+  const page = findPageReference(repo, value);
+  if (!page) throw new Error(`Page not found: ${reference}`);
+
+  const node = graph.nodes.find((candidate) => candidate.id === pageNodeId(page.id));
+  if (!node) throw new Error(`Graph page node not found: ${reference}`);
+  return node;
+}
+
+export function resolveEntityGraphNodeReference(
+  graph: KnowledgeGraph,
+  reference: string
+): GraphNode {
+  const node = findEntityGraphNodeReference(graph, reference);
+  if (!node) throw new Error(`Graph entity node not found: ${reference}`);
+  return node;
+}
+
+function findPageGraphNodeReference(
+  repo: WikiRepository,
+  graph: KnowledgeGraph,
+  reference: string
+): GraphNode | null {
+  try {
+    return resolvePageGraphNodeReference(repo, graph, reference);
+  } catch (error) {
+    if (error instanceof Error && isMissingPageGraphReferenceError(error)) return null;
+    throw error;
+  }
+}
+
+function findEntityGraphNodeReference(graph: KnowledgeGraph, reference: string): GraphNode | null {
+  const decoded = decodeURIComponent(reference).trim();
+  const value = stripGraphNodePrefix(decoded);
+  const normalized = normalizeTitle(value);
+  return (
+    graph.nodes.find((candidate) => {
+      const candidateEntityId = candidate.metadata.entityId;
+      return (
+        candidate.kind === "entity" &&
+        (candidate.id === decoded ||
+          candidate.id === entityNodeId(value) ||
+          candidateEntityId === value ||
+          normalizeTitle(candidate.title) === normalized)
+      );
+    }) ?? null
+  );
+}
+
+function findPageReference(repo: WikiRepository, reference: string): WikiPage | null {
+  return resolvePageReference(repo, reference);
+}
+
+function isMissingPageGraphReferenceError(error: Error): boolean {
+  return (
+    error.message.startsWith("Page not found:") ||
+    error.message.startsWith("Graph page node not found:")
+  );
+}
+
+function stripGraphNodePrefix(value: string): string {
+  return value.replace(/^(page|entity|agent|resource):/, "");
 }
 
 function normalizePageForSave(page: WikiPage): WikiPage {
@@ -1437,6 +2189,42 @@ function rowToLink(row: LinkRow): WikiLink {
     origin: row.origin,
     sourceText: row.source_text ?? undefined,
     createdByAgentId: row.created_by_agent_id ?? undefined,
+    createdAt: row.created_at
+  };
+}
+
+function rowToEntity(row: EntityRow): WikiEntity {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    slug: row.slug,
+    summary: row.summary ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    metadata: parseObjectJson(row.metadata_json, "entities.metadata_json")
+  };
+}
+
+function rowToEntityMention(row: EntityMentionRow): EntityMention {
+  return {
+    id: row.id,
+    pageId: row.page_id,
+    entityId: row.entity_id,
+    sourceText: row.source_text,
+    createdAt: row.created_at
+  };
+}
+
+function rowToEntityLink(row: EntityLinkRow): EntityLink {
+  assertEntityLinkOrigin(row.origin);
+
+  return {
+    id: row.id,
+    fromEntityId: row.from_entity_id,
+    toEntityId: row.to_entity_id,
+    origin: row.origin,
+    sourcePageId: row.source_page_id ?? undefined,
     createdAt: row.created_at
   };
 }
@@ -1549,6 +2337,341 @@ function createIndexJob(input: CreateIndexJobInput): WikiIndexJob {
   };
 }
 
+function createEntityLink(
+  fromEntityId: string,
+  toEntityId: string,
+  origin: EntityLinkOrigin,
+  createdAt: string,
+  sourcePageId?: string | undefined
+): EntityLink {
+  const fromEntityIdCanonical = fromEntityId <= toEntityId ? fromEntityId : toEntityId;
+  const toEntityIdCanonical = fromEntityId <= toEntityId ? toEntityId : fromEntityId;
+  return {
+    id: createEntityLinkId(fromEntityIdCanonical, toEntityIdCanonical, origin, sourcePageId),
+    fromEntityId: fromEntityIdCanonical,
+    toEntityId: toEntityIdCanonical,
+    origin,
+    sourcePageId,
+    createdAt
+  };
+}
+
+function buildKnowledgeGraph(input: {
+  pages: WikiPage[];
+  pageLinks: WikiLink[];
+  entities: WikiEntity[];
+  entityLinks: EntityLink[];
+  mentions: EntityMention[];
+}): KnowledgeGraph {
+  const nodes = new Map<string, GraphNode>();
+  const edges = new Map<string, GraphEdge>();
+  const pagesById = new Map(input.pages.map((page) => [page.id, page]));
+  const entitiesById = new Map(input.entities.map((entity) => [entity.id, entity]));
+
+  for (const page of input.pages) {
+    nodes.set(pageNodeId(page.id), {
+      id: pageNodeId(page.id),
+      kind: "page",
+      subtype: page.kind,
+      title: page.title,
+      summary: page.summary,
+      createdAt: page.createdAt,
+      updatedAt: page.updatedAt,
+      metadata: {
+        pageId: page.id,
+        slug: page.slug,
+        status: page.status,
+        sourceType: page.sourceType,
+        trust: page.trust
+      }
+    });
+
+    if (page.createdByAgentId) {
+      const agentId = page.createdByAgentId.trim();
+      const nodeId = agentNodeId(agentId);
+      nodes.set(nodeId, {
+        id: nodeId,
+        kind: "agent",
+        title: agentId,
+        metadata: { agentId }
+      });
+      edges.set(createGraphEdgeId("created_by", page.id, agentId), {
+        id: createGraphEdgeId("created_by", page.id, agentId),
+        kind: "created_by",
+        fromNodeId: pageNodeId(page.id),
+        toNodeId: nodeId,
+        origin: "system",
+        sourcePageId: page.id,
+        createdAt: page.createdAt,
+        metadata: {}
+      });
+    }
+
+    if (page.sourceUrl) {
+      const nodeId = resourceNodeId(page.sourceUrl);
+      nodes.set(nodeId, {
+        id: nodeId,
+        kind: "resource",
+        subtype: page.sourceType,
+        title: page.sourceUrl,
+        metadata: { url: page.sourceUrl, sourceType: page.sourceType }
+      });
+      edges.set(createGraphEdgeId("sourced_from", page.id, page.sourceUrl), {
+        id: createGraphEdgeId("sourced_from", page.id, page.sourceUrl),
+        kind: "sourced_from",
+        fromNodeId: pageNodeId(page.id),
+        toNodeId: nodeId,
+        origin: "system",
+        sourcePageId: page.id,
+        createdAt: page.createdAt,
+        metadata: {}
+      });
+    }
+  }
+
+  for (const entity of input.entities) {
+    nodes.set(entityNodeId(entity.id), {
+      id: entityNodeId(entity.id),
+      kind: "entity",
+      subtype: entity.kind,
+      title: entity.title,
+      summary: entity.summary,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt,
+      metadata: { ...entity.metadata, entityId: entity.id, slug: entity.slug }
+    });
+  }
+
+  for (const link of input.pageLinks) {
+    if (!pagesById.has(link.fromPageId) || !pagesById.has(link.toPageId)) continue;
+    edges.set(createGraphEdgeId("links_to", link.id), {
+      id: createGraphEdgeId("links_to", link.id),
+      kind: "links_to",
+      fromNodeId: pageNodeId(link.fromPageId),
+      toNodeId: pageNodeId(link.toPageId),
+      origin: link.origin,
+      sourcePageId: link.fromPageId,
+      createdAt: link.createdAt,
+      metadata: {
+        linkId: link.id,
+        sourceText: link.sourceText,
+        createdByAgentId: link.createdByAgentId
+      }
+    });
+  }
+
+  for (const mention of input.mentions) {
+    const page = pagesById.get(mention.pageId);
+    const entity = entitiesById.get(mention.entityId);
+    if (!page || !entity) continue;
+
+    const represents =
+      metadataPageId(entity.metadata) === mention.pageId && mention.sourceText === page.title;
+    const kind = represents ? "represents" : "mentions";
+    const edgeId = represents
+      ? createGraphEdgeId("represents", mention.pageId, mention.entityId)
+      : createGraphEdgeId(kind, mention.id);
+    edges.set(edgeId, {
+      id: edgeId,
+      kind,
+      fromNodeId: pageNodeId(mention.pageId),
+      toNodeId: entityNodeId(mention.entityId),
+      origin: "derived",
+      sourcePageId: mention.pageId,
+      createdAt: mention.createdAt,
+      metadata: {
+        mentionId: mention.id,
+        sourceText: mention.sourceText
+      }
+    });
+  }
+
+  for (const entity of input.entities) {
+    const pageId = metadataPageId(entity.metadata);
+    if (!pageId || !pagesById.has(pageId)) continue;
+    const edgeId = createGraphEdgeId("represents", pageId, entity.id);
+    if (edges.has(edgeId)) continue;
+    edges.set(edgeId, {
+      id: edgeId,
+      kind: "represents",
+      fromNodeId: pageNodeId(pageId),
+      toNodeId: entityNodeId(entity.id),
+      origin: "derived",
+      sourcePageId: pageId,
+      createdAt: entity.createdAt,
+      metadata: { entityId: entity.id }
+    });
+  }
+
+  for (const link of input.entityLinks) {
+    if (!entitiesById.has(link.fromEntityId) || !entitiesById.has(link.toEntityId)) continue;
+    edges.set(createGraphEdgeId("entity_link", link.id), {
+      id: createGraphEdgeId("entity_link", link.id),
+      kind: link.origin === "co-mention" ? "co_mentioned_with" : "related_to",
+      fromNodeId: entityNodeId(link.fromEntityId),
+      toNodeId: entityNodeId(link.toEntityId),
+      origin: link.origin,
+      sourcePageId: link.sourcePageId,
+      createdAt: link.createdAt,
+      metadata: { entityLinkId: link.id }
+    });
+  }
+
+  return {
+    nodes: [...nodes.values()].sort(compareGraphNodes),
+    edges: [...edges.values()].sort(compareGraphEdges),
+    pages: input.pages,
+    pageLinks: input.pageLinks,
+    entities: input.entities,
+    entityLinks: input.entityLinks,
+    mentions: input.mentions
+  };
+}
+
+function traverseGraph(
+  graph: KnowledgeGraph,
+  rootId: string,
+  depth: number,
+  limit: number
+): Set<string> {
+  const selectedIds = new Set<string>([rootId]);
+  const queue: Array<{ id: string; depth: number }> = [{ id: rootId, depth: 0 }];
+  const adjacency = new Map<string, string[]>();
+
+  for (const edge of graph.edges) {
+    const from = adjacency.get(edge.fromNodeId) ?? [];
+    from.push(edge.toNodeId);
+    adjacency.set(edge.fromNodeId, from);
+
+    const to = adjacency.get(edge.toNodeId) ?? [];
+    to.push(edge.fromNodeId);
+    adjacency.set(edge.toNodeId, to);
+  }
+
+  while (queue.length > 0 && selectedIds.size < limit) {
+    const current = queue.shift();
+    if (!current || current.depth >= depth) continue;
+
+    for (const nextId of adjacency.get(current.id) ?? []) {
+      if (selectedIds.has(nextId)) continue;
+      selectedIds.add(nextId);
+      queue.push({ id: nextId, depth: current.depth + 1 });
+      if (selectedIds.size >= limit) break;
+    }
+  }
+
+  return selectedIds;
+}
+
+function filterKnowledgeGraph(
+  graph: KnowledgeGraph,
+  center: GraphNode,
+  selectedIds: Set<string>
+): KnowledgeGraphNeighborhood {
+  const edges = graph.edges.filter(
+    (edge) => selectedIds.has(edge.fromNodeId) && selectedIds.has(edge.toNodeId)
+  );
+  const pageIds = new Set<string>();
+  const entityIds = new Set<string>();
+
+  for (const id of selectedIds) {
+    if (id.startsWith("page:")) pageIds.add(id.slice("page:".length));
+    if (id.startsWith("entity:")) entityIds.add(id.slice("entity:".length));
+  }
+
+  return {
+    center,
+    nodes: graph.nodes.filter((node) => selectedIds.has(node.id)),
+    edges,
+    pages: graph.pages.filter((page) => pageIds.has(page.id)),
+    pageLinks: graph.pageLinks.filter(
+      (link) => pageIds.has(link.fromPageId) && pageIds.has(link.toPageId)
+    ),
+    entities: graph.entities.filter((entity) => entityIds.has(entity.id)),
+    entityLinks: graph.entityLinks.filter(
+      (link) => entityIds.has(link.fromEntityId) && entityIds.has(link.toEntityId)
+    ),
+    mentions: graph.mentions.filter(
+      (mention) => pageIds.has(mention.pageId) && entityIds.has(mention.entityId)
+    )
+  };
+}
+
+function pageNodeId(pageId: string): string {
+  return createGraphNodeId("page", pageId);
+}
+
+function entityNodeId(entityId: string): string {
+  return createGraphNodeId("entity", entityId);
+}
+
+function agentNodeId(agentId: string): string {
+  return createGraphNodeId("agent", slugify(agentId) || shortHash(agentId));
+}
+
+function resourceNodeId(sourceUrl: string): string {
+  return createGraphNodeId("resource", shortHash(sourceUrl));
+}
+
+function metadataPageId(metadata: Record<string, unknown>): string | null {
+  const value = metadata.pageId;
+  return typeof value === "string" ? value : null;
+}
+
+function compareGraphNodes(left: GraphNode, right: GraphNode): number {
+  return (
+    left.kind.localeCompare(right.kind) ||
+    (left.subtype ?? "").localeCompare(right.subtype ?? "") ||
+    left.title.localeCompare(right.title) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function compareGraphEdges(left: GraphEdge, right: GraphEdge): number {
+  return (
+    left.kind.localeCompare(right.kind) ||
+    left.fromNodeId.localeCompare(right.fromNodeId) ||
+    left.toNodeId.localeCompare(right.toNodeId) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function pushMention(mentions: EntityMention[], seen: Set<string>, mention: EntityMention): void {
+  const key = `${mention.pageId}:${mention.entityId}:${mention.sourceText}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  mentions.push(mention);
+}
+
+function parseEntityTarget(target: string): { kind?: string | undefined; title: string } {
+  const trimmed = target.trim();
+  const typed = /^([A-Za-z][A-Za-z0-9 _-]{1,31}):(.+)$/.exec(trimmed);
+  if (!typed) return { title: trimmed };
+
+  const kind = normalizeEntityKind(typed[1]);
+  const title = typed[2]?.trim() ?? "";
+  if (!title) return { title: trimmed };
+
+  return { kind, title };
+}
+
+function pageEntityKind(page: WikiPage | null): string | null {
+  if (!page) return null;
+
+  const metadataKind = metadataString(page.metadata, "entityKind");
+  if (metadataKind) return normalizeEntityKind(metadataKind);
+  if (page.metadata.entity === false) return null;
+  if (page.metadata.entity === true) return normalizeEntityKind(page.kind);
+  return null;
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 function getDuplicateGroup(
   groups: Map<string, DuplicateCandidate>,
   normalizedTitle: string
@@ -1579,6 +2702,12 @@ function assertPageStatus(value: string): asserts value is PageStatus {
 function assertLinkOrigin(value: string): asserts value is LinkOrigin {
   if (!linkOrigins.has(value)) {
     throw new Error(`Invalid link origin: ${value}`);
+  }
+}
+
+function assertEntityLinkOrigin(value: string): asserts value is EntityLinkOrigin {
+  if (!entityLinkOrigins.has(value)) {
+    throw new Error(`Invalid entity link origin: ${value}`);
   }
 }
 

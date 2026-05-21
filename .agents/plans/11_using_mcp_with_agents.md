@@ -59,10 +59,10 @@ Do not put OpenAI, embedding, or Qdrant settings in MCP client env. Keep the def
 
 Semantic indexing is implemented. It uses `text-embedding-3-small`, stores chunks in SQLite, and stores vectors in Qdrant.
 
-Current search is SQLite-backed:
+Current search and retrieval stack:
 
 - `wiki_search` uses FTS5 and recent-page fallback.
-- `wiki_graph_query` reads SQLite links.
+- `wiki_graph_query` returns a heterogeneous graph assembled from SQLite pages, links, entities, mentions, agents, and resources.
 - `wiki_get_page` returns Markdown by default.
 - `wiki_rag_query` uses Qdrant semantic search when indexed, with SQLite FTS fallback.
 - `wiki_rebuild_index` rebuilds Qdrant from SQLite.
@@ -105,7 +105,7 @@ Target client config after publish:
 }
 ```
 
-For this project, npm is the best first publishing target because MCP clients already know how to spawn Node commands. A Homebrew formula or curl installer can come later if the server grows beyond a TypeScript package.
+For this project, npm is the best first publishing target because MCP clients already know how to spawn Node commands. A Homebrew formula or curl installer belongs in packaging work if the server grows beyond a TypeScript package.
 
 ## MCP Client Config
 
@@ -234,7 +234,7 @@ Direct trusted write:
 {
   "title": "Session summary: wiki API wiring",
   "body": "Implemented local API routes and MCP tools. Next step: connect the Next.js UI to the API.",
-  "kind": "chat",
+  "kind": "note",
   "agentId": "codex",
   "targetPages": ["Personal wiki"],
   "mode": "direct"
@@ -275,7 +275,7 @@ Use wiki_rag_query when you need compiled context.
 When new durable knowledge appears, call wiki_add_note.
 Use mode=propose by default.
 Use mode=direct only when i explicitly ask you to write.
-Prefer short notes with [[wikilinks]] over full chat transcripts.
+Prefer short notes with [[wikilinks]] over full conversation transcripts.
 Do not store secrets, credentials, private keys, tokens, or raw sensitive dumps.
 ```
 

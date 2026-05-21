@@ -22,8 +22,13 @@ describe("server app", () => {
       expect(largerPageList.status).toBe(200);
 
       const graph = await app.request("/api/graph");
-      const graphJson = (await graph.json()) as { pages: unknown[]; links: unknown[] };
-      expect(graphJson).toMatchObject({ pages: [], links: [] });
+      const graphJson = (await graph.json()) as {
+        nodes: unknown[];
+        edges: unknown[];
+        entities: unknown[];
+        mentions: unknown[];
+      };
+      expect(graphJson).toMatchObject({ nodes: [], edges: [], entities: [], mentions: [] });
 
       const search = await app.request("/api/search?q=missing");
       const searchJson = (await search.json()) as { pages: unknown[] };
@@ -70,16 +75,16 @@ describe("server app", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          kind: "chat session",
-          title: "Planning chat"
+          kind: "research note",
+          title: "Planning note"
         })
       });
 
       expect(response.status).toBe(201);
       const json = (await response.json()) as { page: { id: string; kind: string } };
       expect(json.page).toMatchObject({
-        id: "chat-session-planning-chat",
-        kind: "chat-session"
+        id: "research-note-planning-note",
+        kind: "research-note"
       });
     } finally {
       close();
@@ -141,8 +146,90 @@ describe("server app", () => {
       expect(json.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
       const graph = await app.request(`/api/graph?focus=${json.page.id}`);
-      const graphJson = (await graph.json()) as { pages: Array<{ id: string }> };
+      expect(graph.status).toBe(200);
+      const graphJson = (await graph.json()) as {
+        nodes: Array<{ id: string; kind: string; title: string }>;
+        pages: Array<{ id: string }>;
+      };
+      expect(graphJson.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: `page:${json.page.id}`, kind: "page" }),
+          expect.objectContaining({ id: "page:topic-personal-wiki", kind: "page" })
+        ])
+      );
       expect(graphJson.pages.map((page) => page.id)).toContain("topic-personal-wiki");
+      expect(graphJson.pages.map((page) => page.id)).toContain(json.page.id);
+    } finally {
+      close();
+    }
+  });
+
+  it("returns heterogeneous graph nodes from wikilinks without requiring pages", async () => {
+    const { app, close } = createTestApp();
+
+    try {
+      await app.request("/api/pages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "article",
+          title: "Graph note",
+          body: "Connect [[person:Andre Karpathy]] and [[organization:OpenAI]]."
+        })
+      });
+
+      const graph = await app.request("/api/graph");
+      const graphJson = (await graph.json()) as {
+        nodes: Array<{ kind: string; subtype?: string; title: string }>;
+        pages: Array<{ id: string; title: string }>;
+        entities: Array<{ id: string; kind: string; title: string }>;
+        edges: Array<{ kind: string }>;
+      };
+      expect(graphJson.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "page", title: "Graph note" }),
+          expect.objectContaining({ kind: "entity", subtype: "person", title: "Andre Karpathy" }),
+          expect.objectContaining({ kind: "entity", subtype: "organization", title: "OpenAI" })
+        ])
+      );
+      expect(graphJson.entities).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "person", title: "Andre Karpathy" }),
+          expect.objectContaining({ kind: "organization", title: "OpenAI" })
+        ])
+      );
+      expect(graphJson.edges.map((edge) => edge.kind).sort()).toEqual([
+        "co_mentioned_with",
+        "mentions",
+        "mentions"
+      ]);
+
+      const personEntity = graphJson.entities.find((entity) => entity.title === "Andre Karpathy");
+      expect(personEntity).toBeDefined();
+      const neighborhood = await app.request(`/api/graph?focusEntityId=${personEntity?.id}`);
+      expect(neighborhood.status).toBe(200);
+      const neighborhoodJson = (await neighborhood.json()) as {
+        center: { kind: string; title: string };
+      };
+      expect(neighborhoodJson.center).toMatchObject({
+        kind: "entity",
+        title: "Andre Karpathy"
+      });
+
+      const graphNotePage = graphJson.pages.find((page) => page.title === "Graph note");
+      expect(graphNotePage).toBeDefined();
+      const pageNeighborhood = await app.request(`/api/graph?focusPageId=${graphNotePage?.id}`);
+      expect(pageNeighborhood.status).toBe(200);
+      const pageNeighborhoodJson = (await pageNeighborhood.json()) as {
+        center: { kind: string; title: string };
+      };
+      expect(pageNeighborhoodJson.center).toMatchObject({
+        kind: "page",
+        title: "Graph note"
+      });
+
+      const missingFocus = await app.request("/api/graph?focusPageId=missing-page");
+      expect(missingFocus.status).toBe(404);
     } finally {
       close();
     }
@@ -189,6 +276,27 @@ describe("server app", () => {
       const ragJson = (await rag.json()) as { mode: string; markdown: string };
       expect(ragJson.mode).toBe("semantic");
       expect(ragJson.markdown).toContain("# Vector search");
+    } finally {
+      close();
+    }
+  });
+
+  it("returns 404 for targeted index rebuilds with missing pages", async () => {
+    const { app, close } = createTestApp({
+      indexConfig: testIndexConfig,
+      embeddingProvider: new FakeEmbeddingProvider(),
+      qdrant: new FakeQdrantStore()
+    });
+
+    try {
+      const response = await app.request("/api/index/rebuild", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pageIds: ["missing-page"] })
+      });
+      expect(response.status).toBe(404);
+      const json = (await response.json()) as { error: string };
+      expect(json.error).toBe("Page not found for indexing: missing-page");
     } finally {
       close();
     }

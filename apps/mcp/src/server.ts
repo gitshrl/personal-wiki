@@ -41,6 +41,7 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
   const repo =
     options.repo ??
     createWikiRepository(openWikiDatabase({ path: runtimePaths.databasePath, migrate: true }));
+  repo.rebuildDerivedGraph();
   const context: WikiToolContext = {
     repo,
     indexConfig: options.indexConfig,
@@ -144,8 +145,11 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
     "wiki_graph_query",
     {
       title: "Query Wiki Graph",
-      description: "Return the full graph or a local graph neighborhood.",
+      description: "Return the full heterogeneous graph or a local node neighborhood.",
       inputSchema: {
+        focusNodeId: z.string().optional(),
+        focusEntityId: z.string().optional(),
+        focusId: z.string().optional(),
         focusPageId: z.string().optional(),
         depth: z.number().int().min(1).max(4).optional(),
         limit: z.number().int().min(1).max(500).optional()

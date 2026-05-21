@@ -45,8 +45,8 @@ Implemented workspace packages:
 - `apps/web`: Next.js 16 and React 19 UI shell based on `.agents/design/persona-wiki`, backed by the HTTP API.
 - `apps/server`: Hono HTTP API for pages, search, graph, notes, links, proposals, runtime info, index rebuild, and RAG.
 - `apps/mcp`: stdio MCP server with page resources, wiki tools, RAG query, and index rebuild.
-- `packages/wiki-core`: page model, wikilinks, graph helpers, Markdown rendering, runtime paths.
-- `packages/wiki-db`: SQLite schema, migrations, repository, revisions, proposals, chunks, index jobs, FTS5 search.
+- `packages/wiki-core`: page model, wikilinks, heterogeneous graph types, Markdown rendering, runtime paths.
+- `packages/wiki-db`: SQLite schema, migrations, repository, revisions, proposals, chunks, index jobs, FTS5 search, and derived graph assembly.
 - `packages/wiki-index`: chunking, content hashes, OpenAI embeddings, Qdrant sync, semantic search, and RAG Markdown context.
 - `packages/wiki-agent`: add-note proposal and page helpers.
 
@@ -54,8 +54,12 @@ Implemented UI behavior:
 
 - No mock data in the app.
 - Empty state handles no pages and offline server state without raw fetch errors.
-- Sidebar groups and graph legend derive from stored page kinds.
-- Graph control uses the design glyph icon.
+- Home shows a compact recent-pages index with page, agent, and updated columns.
+- Page view shows title, metadata, body, related pages, and an icon-only graph neighborhood action.
+- Sidebar groups derive from stored page kinds.
+- Graph legend derives from graph node kinds.
+- Graph renders heterogeneous nodes: pages, entities, agents, and resources.
+- Graph uses Cytoscape.js for layout, pan, zoom, dragging, and focus.
 
 Implemented commands:
 
@@ -69,7 +73,7 @@ pnpm dev:server
 pnpm dev:mcp
 ```
 
-Outside current scope:
+Remaining this-phase work in this repository:
 
 - Unreviewed direct writes for untrusted agents.
 - Remote MCP.
@@ -86,6 +90,9 @@ Outside current scope:
 - OpenAI, embedding, and Qdrant settings live in `~/.personal-wiki/config.json`, not tracked source.
 - Runtime data lives under `~/.personal-wiki`.
 - Page kinds are data-driven and can grow by user/domain.
+- Entity kinds are data-driven and can grow by user/domain.
+- Graph node kinds stay stable: `page`, `entity`, `agent`, and `resource`.
+- There is no dedicated `chat` graph node. A useful conversation can become a page, but raw conversation state is not a graph primitive.
 - Edges stay plain in the core graph.
 - Graph queries stay light first: SQLite links and recursive CTEs.
 - Agent-facing memory reads return Markdown by default.

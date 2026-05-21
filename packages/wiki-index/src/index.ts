@@ -190,6 +190,8 @@ interface QdrantSearchResponse {
   result?: unknown;
 }
 
+const qdrantDistances = new Set<QdrantConfig["distance"]>(["Cosine", "Dot", "Euclid", "Manhattan"]);
+
 export function buildIndexText(page: WikiPage): string {
   const sections = [
     `# ${page.title}`,
@@ -210,7 +212,7 @@ export function readPersonalWikiConfig(env = process.env): PersonalWikiConfigFil
     throw new Error(`Invalid personal wiki config: ${configPath}`);
   }
 
-  return parsed as PersonalWikiConfigFile;
+  return parsePersonalWikiConfig(parsed as Record<string, unknown>, configPath);
 }
 
 export function getWikiIndexConfig(
@@ -244,6 +246,95 @@ export function getWikiIndexConfig(
       distance: fileConfig.qdrant?.distance ?? defaultQdrantConfig.distance
     }
   };
+}
+
+function parsePersonalWikiConfig(
+  value: Record<string, unknown>,
+  configPath: string
+): PersonalWikiConfigFile {
+  const openai = optionalRecord(value.openai, "openai", configPath);
+  const embedding = optionalRecord(value.embedding, "embedding", configPath);
+  const qdrant = optionalRecord(value.qdrant, "qdrant", configPath);
+
+  return {
+    openai: openai
+      ? {
+          apiKey: optionalString(openai.apiKey, "openai.apiKey", configPath),
+          baseUrl: optionalString(openai.baseUrl, "openai.baseUrl", configPath)
+        }
+      : undefined,
+    embedding: embedding
+      ? {
+          provider: optionalEmbeddingProvider(embedding.provider, configPath),
+          model: optionalString(embedding.model, "embedding.model", configPath),
+          dimensions: optionalPositiveNumber(
+            embedding.dimensions,
+            "embedding.dimensions",
+            configPath
+          ),
+          apiKey: optionalString(embedding.apiKey, "embedding.apiKey", configPath),
+          baseUrl: optionalString(embedding.baseUrl, "embedding.baseUrl", configPath)
+        }
+      : undefined,
+    qdrant: qdrant
+      ? {
+          url: optionalString(qdrant.url, "qdrant.url", configPath),
+          collection: optionalString(qdrant.collection, "qdrant.collection", configPath),
+          vectorSize: optionalPositiveNumber(qdrant.vectorSize, "qdrant.vectorSize", configPath),
+          distance: optionalQdrantDistance(qdrant.distance, configPath)
+        }
+      : undefined
+  };
+}
+
+function optionalRecord(
+  value: unknown,
+  fieldName: string,
+  configPath: string
+): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw new Error(`Invalid personal wiki config: ${configPath} (${fieldName} must be an object)`);
+}
+
+function optionalString(value: unknown, fieldName: string, configPath: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value;
+  throw new Error(`Invalid personal wiki config: ${configPath} (${fieldName} must be a string)`);
+}
+
+function optionalPositiveNumber(
+  value: unknown,
+  fieldName: string,
+  configPath: string
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  throw new Error(
+    `Invalid personal wiki config: ${configPath} (${fieldName} must be a positive number)`
+  );
+}
+
+function optionalEmbeddingProvider(value: unknown, configPath: string): "openai" | undefined {
+  if (value === undefined || value === "openai") return value;
+  throw new Error(
+    `Invalid personal wiki config: ${configPath} (embedding.provider must be openai)`
+  );
+}
+
+function optionalQdrantDistance(
+  value: unknown,
+  configPath: string
+): QdrantConfig["distance"] | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && qdrantDistances.has(value as QdrantConfig["distance"])) {
+    return value as QdrantConfig["distance"];
+  }
+  throw new Error(
+    `Invalid personal wiki config: ${configPath} (qdrant.distance must be Cosine, Dot, Euclid, or Manhattan)`
+  );
 }
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
@@ -713,14 +804,29 @@ function selectPages(repo: WikiRepository, options: IndexWikiPagesOptions): Wiki
   const limit = options.limit ? normalizeLimit(options.limit, 500) : undefined;
   const pages =
     options.pages ??
-    (options.pageIds
-      ? options.pageIds.flatMap((pageId) => {
-          const page = repo.getPage(pageId);
-          return page ? [page] : [];
-        })
-      : repo.listPages({ limit }));
+    (options.pageIds ? getRequiredPages(repo, options.pageIds) : repo.listPages({ limit }));
 
   return limit ? pages.slice(0, limit) : pages;
+}
+
+function getRequiredPages(repo: WikiRepository, pageIds: string[]): WikiPage[] {
+  const pages: WikiPage[] = [];
+  const missingPageIds: string[] = [];
+
+  for (const pageId of pageIds) {
+    const page = repo.getPage(pageId);
+    if (page) {
+      pages.push(page);
+    } else {
+      missingPageIds.push(pageId);
+    }
+  }
+
+  if (missingPageIds.length > 0) {
+    throw new Error(`Page not found for indexing: ${missingPageIds.join(", ")}`);
+  }
+
+  return pages;
 }
 
 function fallbackSearch(

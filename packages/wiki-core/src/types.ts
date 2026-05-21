@@ -4,6 +4,21 @@ export type PageStatus = "active" | "archived" | "draft";
 
 export type LinkOrigin = "wikilink" | "manual" | "proposal" | "system";
 
+export type EntityKind = string;
+
+export type EntityLinkOrigin = "co-mention" | "manual" | "page-title" | "system";
+
+export type GraphNodeKind = "page" | "entity" | "agent" | "resource";
+
+export type GraphEdgeKind =
+  | "links_to"
+  | "mentions"
+  | "represents"
+  | "created_by"
+  | "sourced_from"
+  | "co_mentioned_with"
+  | "related_to";
+
 export interface WikiPage {
   id: string;
   kind: PageKind;
@@ -39,6 +54,56 @@ export interface WikiLink {
   createdAt: string;
 }
 
+export interface WikiEntity {
+  id: string;
+  kind: EntityKind;
+  title: string;
+  slug: string;
+  summary?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface EntityMention {
+  id: string;
+  pageId: string;
+  entityId: string;
+  sourceText: string;
+  createdAt: string;
+}
+
+export interface EntityLink {
+  id: string;
+  fromEntityId: string;
+  toEntityId: string;
+  origin: EntityLinkOrigin;
+  sourcePageId?: string | undefined;
+  createdAt: string;
+}
+
+export interface GraphNode {
+  id: string;
+  kind: GraphNodeKind;
+  subtype?: string | undefined;
+  title: string;
+  summary?: string | undefined;
+  createdAt?: string | undefined;
+  updatedAt?: string | undefined;
+  metadata: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  id: string;
+  kind: GraphEdgeKind;
+  fromNodeId: string;
+  toNodeId: string;
+  origin: string;
+  sourcePageId?: string | undefined;
+  createdAt?: string | undefined;
+  metadata: Record<string, unknown>;
+}
+
 export interface ParsedWikilink {
   raw: string;
   target: string;
@@ -53,6 +118,35 @@ export interface ResolvedWikilink extends ParsedWikilink {
 export interface PageGraph {
   pages: WikiPage[];
   links: WikiLink[];
+}
+
+export interface EntityGraph {
+  entities: WikiEntity[];
+  links: EntityLink[];
+  mentions: EntityMention[];
+  pages: WikiPage[];
+}
+
+export interface EntityNeighborhood {
+  center: WikiEntity;
+  entities: WikiEntity[];
+  links: EntityLink[];
+  mentions: EntityMention[];
+  pages: WikiPage[];
+}
+
+export interface KnowledgeGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  pages: WikiPage[];
+  pageLinks: WikiLink[];
+  entities: WikiEntity[];
+  entityLinks: EntityLink[];
+  mentions: EntityMention[];
+}
+
+export interface KnowledgeGraphNeighborhood extends KnowledgeGraph {
+  center: GraphNode;
 }
 
 export interface PageWithLinks {

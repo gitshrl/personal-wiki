@@ -18,15 +18,20 @@ Agent-facing page and note resources return Markdown by default.
 
 Use JSON for search results, graph neighborhoods, proposal payloads, and machine-oriented metadata. Markdown is the default for anything an agent should read as context.
 
-Resource URI templates:
+Current resource URI templates:
 
 ```txt
 wiki://page/{id}
+wiki://recent
+```
+
+Remaining this-phase resource URI templates:
+
+```txt
 wiki://page/by-slug/{slug}
 wiki://page/{id}/backlinks
 wiki://page/{id}/outgoing
-wiki://graph/neighborhood/{id}?depth=1
-wiki://recent/pages
+wiki://graph/neighborhood/{node_id}?depth=1
 wiki://recent/captures
 wiki://proposal/{id}
 wiki://agent/{agent_id}/notes
@@ -88,7 +93,7 @@ wiki_graph_query
 wiki_rag_query
 ```
 
-Planned read tools:
+Remaining this-phase read tools:
 
 ```txt
 wiki_get_backlinks
@@ -112,6 +117,28 @@ Default:
 format = markdown
 ```
 
+`wiki_graph_query` returns a heterogeneous graph:
+
+```json
+{
+  "nodes": [
+    { "id": "page:note-direct-note", "kind": "page", "subtype": "note", "title": "Direct note" },
+    { "id": "entity:entity-protocol-mcp", "kind": "entity", "subtype": "protocol", "title": "MCP" },
+    { "id": "agent:codex", "kind": "agent", "title": "codex" }
+  ],
+  "edges": [
+    {
+      "kind": "mentions",
+      "fromNodeId": "page:note-direct-note",
+      "toNodeId": "entity:entity-protocol-mcp"
+    },
+    { "kind": "created_by", "fromNodeId": "page:note-direct-note", "toNodeId": "agent:codex" }
+  ]
+}
+```
+
+Focus can be a graph node id, page id, entity title, or page title. There is no dedicated `chat` node; useful conversations should be distilled into note pages.
+
 Write and proposal tools:
 
 ```txt
@@ -121,7 +148,7 @@ wiki_link_pages
 wiki_rebuild_index
 ```
 
-Planned write and proposal tools:
+Remaining this-phase write and proposal tools:
 
 ```txt
 wiki_capture
@@ -158,7 +185,7 @@ wiki_link_pages
 wiki_runtime
 ```
 
-`wiki_get_page` returns Markdown by default. `wiki_add_note`, `wiki_append_page`, and `wiki_link_pages` default to proposal mode. `mode: "direct"` is available for trusted use and writes to SQLite.
+`wiki_get_page` returns Markdown by default. `wiki_graph_query` returns JSON with `nodes` and `edges`. `wiki_add_note`, `wiki_append_page`, and `wiki_link_pages` default to proposal mode. `mode: "direct"` is available for trusted use and writes to SQLite.
 
 `wiki_rag_query` returns Markdown by default. It uses Qdrant semantic search when the index exists, then falls back to SQLite FTS.
 
@@ -261,7 +288,7 @@ Prompt rules:
 - State uncertainty.
 - Propose wiki changes instead of writing directly.
 - Use `[[wikilinks]]` in proposed body text.
-- Prefer adding durable notes over saving full chat transcripts.
+- Prefer adding durable notes over saving full conversation transcripts.
 
 ## Transports
 

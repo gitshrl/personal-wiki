@@ -20,10 +20,10 @@ Karpathy's LLM Wiki pattern is the root idea:
 raw sources
 -> LLM-maintained wiki
 -> persistent links and synthesis
--> future queries get smarter
+-> queries get smarter
 ```
 
-The key lesson is compounding. The system should not rediscover the same facts through RAG every time. It should turn sources, chats, and questions into a maintained artifact.
+The key lesson is compounding. The system should not rediscover the same facts through RAG every time. It should turn sources, questions, and durable conversation takeaways into a maintained artifact.
 
 This project adapts that pattern:
 
@@ -53,16 +53,16 @@ The initial plan adds useful product ideas:
 
 ## Compounding Loop
 
-The system should make every useful interaction increase future leverage.
+The system should make every useful interaction increase leverage.
 
 ```txt
-capture source or chat
+capture source or conversation takeaway
 -> agent extracts durable notes
 -> wiki pages update
 -> links and backlinks update
 -> graph neighborhoods improve
 -> search and RAG improve
--> future agents answer with less rediscovery
+-> agents answer with less rediscovery
 -> useful answers get filed back
 ```
 
@@ -89,7 +89,7 @@ Default mode is proposal-first. Trusted agents can get direct write permissions 
 
 ## Outside Current Scope
 
-Keep these outside current scope:
+Remaining this-phase work in this repository:
 
 - Full typed edge system.
 - Social account connectors.
@@ -99,7 +99,7 @@ Keep these outside current scope:
 - Automated source refresh.
 - Direct writes for untrusted agents.
 
-These ideas are useful, but the current build should stay aligned with the SQLite-backed page and MCP plan.
+These ideas are useful, but implementation should stay aligned with the SQLite-backed page and MCP plan.
 
 ## References
 

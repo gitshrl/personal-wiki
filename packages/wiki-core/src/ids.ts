@@ -17,8 +17,41 @@ export function createPageId(kind: string, title: string): string {
   return `${pageKind}-${slug || shortHash(title)}`;
 }
 
+export function createEntityId(kind: string, title: string): string {
+  const entityKind = normalizeEntityKind(kind);
+  const slug = slugify(title);
+  return `entity-${entityKind}-${slug || shortHash(title)}`;
+}
+
 export function createLinkId(fromPageId: string, toPageId: string, sourceText: string): string {
   return `link-${shortHash(`${fromPageId}:${toPageId}:${sourceText}`)}`;
+}
+
+export function createEntityMentionId(
+  pageId: string,
+  entityId: string,
+  sourceText: string,
+  index: number
+): string {
+  return `entity-mention-${shortHash(`${pageId}:${entityId}:${sourceText}:${index}`)}`;
+}
+
+export function createEntityLinkId(
+  fromEntityId: string,
+  toEntityId: string,
+  origin: string,
+  sourcePageId?: string | undefined
+): string {
+  const [left, right] = [fromEntityId, toEntityId].sort();
+  return `entity-link-${shortHash(`${left}:${right}:${origin}:${sourcePageId ?? ""}`)}`;
+}
+
+export function createGraphNodeId(kind: string, sourceId: string): string {
+  return `${kind}:${sourceId}`;
+}
+
+export function createGraphEdgeId(kind: string, ...parts: string[]): string {
+  return `graph-edge-${shortHash(`${kind}:${parts.join(":")}`)}`;
 }
 
 export function createAliasId(pageId: string, alias: string): string {
@@ -31,4 +64,8 @@ export function shortHash(value: string): string {
 
 export function normalizePageKind(value: string): string {
   return slugify(value) || "page";
+}
+
+export function normalizeEntityKind(value: string | undefined): string {
+  return slugify(value ?? "") || "entity";
 }

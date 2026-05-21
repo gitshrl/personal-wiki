@@ -274,5 +274,59 @@ export const wikiMigrations: WikiMigration[] = [
         VALUES (new.rowid, new.title, coalesce(new.summary, ''), new.body);
       END;
     `
+  },
+  {
+    version: 3,
+    name: "entity_graph",
+    sql: `
+      CREATE TABLE IF NOT EXISTS entities (
+        id text PRIMARY KEY,
+        kind text NOT NULL,
+        title text NOT NULL,
+        slug text NOT NULL,
+        summary text,
+        created_at text NOT NULL,
+        updated_at text NOT NULL,
+        metadata_json text NOT NULL DEFAULT '{}'
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_kind_slug ON entities(kind, slug);
+      CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind);
+      CREATE INDEX IF NOT EXISTS idx_entities_title ON entities(title);
+      CREATE INDEX IF NOT EXISTS idx_entities_updated_at ON entities(updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS entity_mentions (
+        id text PRIMARY KEY,
+        page_id text NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        entity_id text NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        source_text text NOT NULL,
+        created_at text NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entity_mentions_page_id ON entity_mentions(page_id);
+      CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_id ON entity_mentions(entity_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_mentions_plain
+        ON entity_mentions(page_id, entity_id, source_text);
+
+      CREATE TABLE IF NOT EXISTS entity_links (
+        id text PRIMARY KEY,
+        from_entity_id text NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        to_entity_id text NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        origin text NOT NULL CHECK (origin IN ('co-mention', 'manual', 'page-title', 'system')),
+        source_page_id text REFERENCES pages(id) ON DELETE CASCADE,
+        created_at text NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entity_links_from_entity_id ON entity_links(from_entity_id);
+      CREATE INDEX IF NOT EXISTS idx_entity_links_to_entity_id ON entity_links(to_entity_id);
+      CREATE INDEX IF NOT EXISTS idx_entity_links_source_page_id ON entity_links(source_page_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_links_plain_edge
+        ON entity_links(
+          from_entity_id,
+          to_entity_id,
+          origin,
+          coalesce(source_page_id, '')
+        );
+    `
   }
 ];

@@ -4,10 +4,8 @@ import { z } from "zod";
 import {
   getPersonalWikiRuntimePaths,
   ensurePersonalWikiRuntimeHome,
-  normalizeTitle,
   normalizePageKind,
   renderPageMarkdown,
-  slugify,
   type PersonalWikiRuntimePaths,
   type WikiPage
 } from "@personal-wiki/wiki-core";
@@ -15,6 +13,8 @@ import { buildAddNoteProposal, noteInputToPage } from "@personal-wiki/wiki-agent
 import {
   createWikiRepository,
   openWikiDatabase,
+  resolveGraphFocusNode,
+  resolvePageReference,
   type WikiRepository
 } from "@personal-wiki/wiki-db";
 import {
@@ -124,6 +124,7 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
   const repo =
     options.repo ??
     createWikiRepository(openWikiDatabase({ path: runtimePaths.databasePath, migrate: true }));
+  repo.rebuildDerivedGraph();
   const getIndexConfig = () => options.indexConfig ?? getWikiIndexConfig();
   const app = new Hono();
 
@@ -228,7 +229,7 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
 
   app.get("/api/search", (c) => {
     const q = c.req.query("q")?.trim() ?? "";
-    const limit = parseLimit(c.req.query("limit"), 20);
+    const limit = parseLimit(c.req.query("limit"), 20, 50);
     return c.json({
       query: q,
       pages: q ? repo.searchPages(q, { limit }) : repo.listPages({ limit })
@@ -252,6 +253,10 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
         400,
         "OpenAI API key is required. Add it to ~/.personal-wiki/config.json."
       );
+    }
+    const missingPageIds = findMissingPageIds(repo, input.pageIds ?? []);
+    if (missingPageIds.length > 0) {
+      throw new ApiError(404, `Page not found for indexing: ${missingPageIds.join(", ")}`);
     }
 
     const result = await indexWikiPages(repo, {
@@ -280,19 +285,31 @@ export function createServerApp(options: CreateServerAppOptions = {}) {
   });
 
   app.get("/api/graph", (c) => {
-    const focus = c.req.query("focus") ?? c.req.query("focusPageId");
-    const depth = parseLimit(c.req.query("depth"), 1);
-    const limit = parseLimit(c.req.query("limit"), 100);
-
-    if (!focus) {
-      return c.json(repo.getGraph());
+    const depth = parseLimit(c.req.query("depth"), 1, 4);
+    const limit = parseLimit(c.req.query("limit"), 100, 500);
+    const graph = repo.getKnowledgeGraph();
+    let node;
+    try {
+      node = resolveGraphFocusNode(repo, graph, {
+        focusNodeId: c.req.query("focusNodeId"),
+        focusPageId: c.req.query("focusPageId"),
+        focusEntityId: c.req.query("focusEntityId"),
+        focusId: c.req.query("focus") ?? c.req.query("focusId")
+      });
+    } catch (error) {
+      throw toGraphReferenceApiError(error);
     }
 
-    const page = getPageByReference(repo, focus);
-    const neighborhood = repo.getPageNeighborhood(page.id, { depth, limit });
+    if (!node) {
+      return c.json(graph);
+    }
+
+    const neighborhood = repo.getKnowledgeGraphNeighborhood(node.id, { depth, limit });
     if (!neighborhood) throw new ApiError(404, "Graph focus not found");
     return c.json(neighborhood);
   });
+
+  app.get("/api/page-graph", (c) => c.json(repo.getGraph()));
 
   app.post("/api/links", async (c) => {
     const input = parseSchema(linkSchema, await readJson(c.req));
@@ -370,11 +387,7 @@ function parseSchema<T>(schema: z.Schema<T>, value: unknown): T {
 }
 
 function getPageByReference(repo: WikiRepository, reference: string): WikiPage {
-  const value = decodeURIComponent(reference).trim();
-  const page =
-    repo.getPage(value) ??
-    repo.getPageBySlug(slugify(value)) ??
-    repo.listPages().find((candidate) => normalizeTitle(candidate.title) === normalizeTitle(value));
+  const page = resolvePageReference(repo, reference);
 
   if (!page) {
     throw new ApiError(404, `Page not found: ${reference}`);
@@ -415,11 +428,31 @@ function getOptionalPageByReference(repo: WikiRepository, reference: string): Wi
   }
 }
 
-function parseLimit(value: string | undefined, fallback: number): number {
+function parseLimit(value: string | undefined, fallback: number, max = 500): number {
   if (!value) return fallback;
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return fallback;
-  return Math.max(1, Math.floor(numberValue));
+  return Math.min(max, Math.max(1, Math.floor(numberValue)));
+}
+
+function findMissingPageIds(repo: WikiRepository, pageIds: string[]): string[] {
+  return pageIds.filter((pageId) => !repo.getPage(pageId));
+}
+
+function toGraphReferenceApiError(error: unknown): Error {
+  if (error instanceof Error && isGraphReferenceError(error)) {
+    return new ApiError(404, error.message);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function isGraphReferenceError(error: Error): boolean {
+  return (
+    error.message.startsWith("Page not found:") ||
+    error.message.startsWith("Graph node not found:") ||
+    error.message.startsWith("Graph page node not found:") ||
+    error.message.startsWith("Graph entity node not found:")
+  );
 }
 
 function publicEmbeddingConfig(config: WikiIndexConfig) {

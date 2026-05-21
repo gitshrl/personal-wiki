@@ -4,7 +4,7 @@
 
 Personal Wiki is a compounding wiki and knowledge graph. It should feel close to Obsidian in structure, but rendered as a custom HTML app and exposed to agents through MCP.
 
-Every entity is a page. Pages connect through `[[wikilinks]]` in their body. Backlinks are derived automatically. The user captures sources and chats; agents maintain the wiki.
+Pages are durable wiki artifacts. Entities are first-class graph nodes extracted from pages and wikilinks. Pages connect to pages, pages mention entities, and entities can connect through derived relationships. Agents maintain the wiki by writing clean pages and links, not by storing raw conversation transcripts as graph nodes.
 
 ## Inspiration
 
@@ -16,20 +16,20 @@ The important move is:
 raw sources
 -> agent-maintained wiki
 -> persistent cross-links
--> better future answers
+-> better answers
 ```
 
 This project keeps that compounding behavior, but changes the surface:
 
 ```txt
 raw captures and sources
--> SQLite-backed entity pages
--> graph + Qdrant index
+-> SQLite-backed pages and entities
+-> heterogeneous graph + Qdrant index
 -> custom HTML app
 -> MCP read/write memory bus
 ```
 
-RAG is still useful, but it is not the product. The product is the maintained wiki artifact that gets richer with every source, chat, question, and accepted note.
+RAG is still useful, but it is not the product. The product is the maintained wiki artifact that gets richer with every source, question, and accepted note.
 
 ## Moat Thesis
 
@@ -44,7 +44,7 @@ agent reads memory
 -> note becomes a styled wiki page
 -> wikilinks update backlinks
 -> graph neighborhoods improve
--> future agents retrieve better context
+-> agents retrieve better context
 ```
 
 Build toward these defensible parts:
@@ -72,15 +72,14 @@ Important files:
 
 The mock includes sample kinds like `repo`, `lab`, `claim`, `source`, and `brainstorm`. The real product should not hardcode a fixed kind list.
 
-## Entity Kinds
+## Kinds And Nodes
 
-Page kinds are user and domain defined.
+Page kinds and entity kinds are user and domain defined. Graph node kinds stay small and stable: `page`, `entity`, `agent`, and `resource`. A conversation can create a note page, but there is no dedicated `chat` graph node.
 
 Examples:
 
 - `topic`
 - `note`
-- `chat`
 - `source`
 - `person`
 - `agent`
@@ -90,7 +89,8 @@ Examples:
 Rules:
 
 - Store kinds as normalized slugs.
-- Let the sidebar and graph legend derive groups from stored pages.
+- Let the sidebar derive groups from stored pages.
+- Let the graph legend derive groups from graph node kinds and subtypes.
 - Do not require schema changes for new kinds.
 - Avoid fake empty groups when the database has no pages.
 
@@ -127,7 +127,7 @@ Rules:
 ### Write Memory After Chat
 
 1. Agent finishes useful work.
-2. Agent calls `wiki_add_note`, `wiki_append_note`, or `wiki_propose_changes`.
+2. Agent calls `wiki_add_note`, `wiki_append_page`, or the proposal workflow.
 3. Server writes directly only for trusted agents and safe operations.
 4. Otherwise the server creates a proposal with page creates, page updates, and links.
 5. UI shows the proposal in review.
@@ -136,7 +136,7 @@ Rules:
 
 ### Capture Source
 
-1. User saves text, URL, PDF text, screenshot OCR, or chat transcript.
+1. User saves text, URL, PDF text, screenshot OCR, or a concise conversation summary.
 2. Server creates a capture item.
 3. Agent extracts candidate pages and wikilinks.
 4. Agent proposes 5 to 15 page updates.
@@ -145,6 +145,6 @@ Rules:
 ### Query The Graph
 
 1. User asks a graph-shaped question.
-2. Server runs graph traversal over SQLite links.
+2. Server runs graph traversal over the heterogeneous graph view assembled from SQLite tables.
 3. Optional RAG expands from related pages.
 4. UI returns pages, neighborhoods, backlinks, and paths.

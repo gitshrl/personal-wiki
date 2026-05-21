@@ -1,12 +1,7 @@
 "use client";
 
-import type {
-  CSSProperties,
-  KeyboardEvent,
-  MouseEvent as ReactMouseEvent,
-  ReactNode,
-  WheelEvent
-} from "react";
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
+import type Cytoscape from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type EntityKind = string;
@@ -39,9 +34,64 @@ type WikiLink = {
   createdAt: string;
 };
 
-type PageGraph = {
+type WikiEntity = {
+  id: string;
+  kind: EntityKind;
+  title: string;
+  slug: string;
+  summary?: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+};
+
+type EntityMention = {
+  id: string;
+  pageId: string;
+  entityId: string;
+  sourceText: string;
+  createdAt: string;
+};
+
+type EntityLink = {
+  id: string;
+  fromEntityId: string;
+  toEntityId: string;
+  origin: string;
+  sourcePageId?: string;
+  createdAt: string;
+};
+
+type GraphNode = {
+  id: string;
+  kind: "page" | "entity" | "agent" | "resource";
+  subtype?: string;
+  title: string;
+  summary?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  metadata: Record<string, unknown>;
+};
+
+type GraphEdge = {
+  id: string;
+  kind: string;
+  fromNodeId: string;
+  toNodeId: string;
+  origin: string;
+  sourcePageId?: string;
+  createdAt?: string;
+  metadata: Record<string, unknown>;
+};
+
+type KnowledgeGraph = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
   pages: WikiPage[];
-  links: WikiLink[];
+  pageLinks: WikiLink[];
+  entities: WikiEntity[];
+  entityLinks: EntityLink[];
+  mentions: EntityMention[];
 };
 
 type ViewState = { mode: "home" } | { mode: "graph" } | { mode: "entry"; id: string };
@@ -53,11 +103,18 @@ type SearchItem = {
   hint: string;
 };
 
+type BreadcrumbItem = {
+  label: string;
+  action?: () => void;
+};
+
 const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "/wiki-api";
 
 export default function Home() {
   const [pages, setPages] = useState<WikiPage[]>([]);
-  const [links, setLinks] = useState<WikiLink[]>([]);
+  const [pageLinks, setPageLinks] = useState<WikiLink[]>([]);
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
+  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
   const [view, setView] = useState<ViewState>({ mode: "home" });
   const [graphFocusId, setGraphFocusId] = useState("");
   const [sidebarFilter, setSidebarFilter] = useState("");
@@ -73,11 +130,12 @@ export default function Home() {
     () => new Map(pages.map((page) => [page.title.toLowerCase(), page])),
     [pages]
   );
+  const nodeById = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
   const connectionStatus = loading ? "" : error ? "offline" : "online";
   const activePage = view.mode === "entry" ? pageById.get(view.id) : undefined;
   const visibleSearchItems = useMemo(
-    () => filterSearchItems(pages, search, links.length),
-    [pages, search, links.length]
+    () => filterSearchItems(pages, search, graphEdges.length),
+    [pages, search, graphEdges.length]
   );
   const sidebarGroups = useMemo(
     () => groupPagesByKind(pages.filter((page) => matchesFilter(page, sidebarFilter))),
@@ -102,15 +160,19 @@ export default function Home() {
       if (!graphResponse.ok) throw new Error(`graph request failed: ${graphResponse.status}`);
 
       const pagesPayload = (await pagesResponse.json()) as { pages: WikiPage[] };
-      const graphPayload = (await graphResponse.json()) as PageGraph;
+      const graphPayload = (await graphResponse.json()) as KnowledgeGraph;
       const nextPages = pagesPayload.pages;
-      const nextLinks = graphPayload.links ?? [];
+      const nextNodes = graphPayload.nodes ?? [];
+      const nextEdges = graphPayload.edges ?? [];
+      const nextPageLinks = graphPayload.pageLinks ?? [];
 
       setPages(nextPages);
-      setLinks(nextLinks);
+      setGraphNodes(nextNodes);
+      setGraphEdges(nextEdges);
+      setPageLinks(nextPageLinks);
       setGraphFocusId((current) => {
-        if (current && nextPages.some((page) => page.id === current)) return current;
-        return nextPages[0]?.id ?? "";
+        if (current && nextNodes.some((node) => node.id === current)) return current;
+        return nextNodes[0]?.id ?? "";
       });
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "failed to load wiki");
@@ -120,9 +182,10 @@ export default function Home() {
   }
 
   function openPage(id: string) {
-    if (!pageById.has(id)) return;
+    const page = pageById.get(id);
+    if (!page) return;
     setView({ mode: "entry", id });
-    setGraphFocusId(id);
+    setGraphFocusId(pageNodeId(page.id));
     closeSearch();
   }
 
@@ -131,9 +194,30 @@ export default function Home() {
     closeSearch();
   }
 
-  function openGraph(focusId = graphFocusId || pages[0]?.id || "") {
-    if (pages.length === 0) return;
+  function openGraph(focusId = graphFocusId || graphNodes[0]?.id || "") {
+    if (graphNodes.length === 0) return;
     setGraphFocusId(focusId);
+    setView({ mode: "graph" });
+    closeSearch();
+  }
+
+  function openGraphNode(id: string) {
+    const node = nodeById.get(id);
+    if (!node) return;
+    setGraphFocusId(id);
+
+    const pageId = metadataPageId(node);
+    if (pageId && pageById.has(pageId)) {
+      openPage(pageId);
+      return;
+    }
+
+    const page = pageByTitle.get(node.title.toLowerCase());
+    if (page) {
+      openPage(page.id);
+      return;
+    }
+
     setView({ mode: "graph" });
     closeSearch();
   }
@@ -184,7 +268,15 @@ export default function Home() {
     }
   }
 
-  const breadcrumb = getBreadcrumb(view, activePage);
+  const breadcrumb = getBreadcrumb({
+    view,
+    activePage,
+    graphNodes,
+    graphFocusId,
+    nodeById,
+    openHome,
+    openGraph
+  });
   const pinnedPages = pages.slice(0, 5);
 
   return (
@@ -196,12 +288,16 @@ export default function Home() {
         </button>
 
         <div className="breadcrumb" aria-label="Breadcrumb">
-          {breadcrumb.map((part, index) => (
-            <span key={`${part}-${index}`}>
+          {breadcrumb.map((item, index) => (
+            <span key={`${item.label}-${index}`} className="breadcrumb__item">
               {index > 0 ? <span className="breadcrumb__sep">/</span> : null}
-              <span className={index === breadcrumb.length - 1 ? "breadcrumb__current" : ""}>
-                {part}
-              </span>
+              {item.action ? (
+                <button type="button" onClick={item.action}>
+                  {item.label}
+                </button>
+              ) : (
+                <span className="breadcrumb__current">{item.label}</span>
+              )}
             </span>
           ))}
         </div>
@@ -245,7 +341,7 @@ export default function Home() {
         <button
           className={`topbar__button ${view.mode === "graph" ? "is-active" : ""}`}
           type="button"
-          disabled={pages.length === 0}
+          disabled={graphNodes.length === 0}
           onClick={() => openGraph()}
           aria-label="Open graph"
           title="Graph"
@@ -326,25 +422,17 @@ export default function Home() {
 
         <main className="main">
           {view.mode === "home" ? (
-            <HomeView
-              pages={pages}
-              links={links}
-              loading={loading}
-              error={error}
-              refreshWiki={refreshWiki}
-              openPage={openPage}
-              openGraph={openGraph}
-            />
+            <HomeView pages={pages} loading={loading} error={error} openPage={openPage} />
           ) : null}
 
           {view.mode === "graph" ? (
             <GraphView
-              pages={pages}
-              links={links}
-              pageById={pageById}
+              nodes={graphNodes}
+              edges={graphEdges}
+              nodeById={nodeById}
               focusId={graphFocusId}
               setFocusId={setGraphFocusId}
-              openPage={openPage}
+              openGraphNode={openGraphNode}
             />
           ) : null}
 
@@ -352,8 +440,7 @@ export default function Home() {
             <EntityPage
               page={activePage}
               pages={pages}
-              links={links}
-              pageById={pageById}
+              links={pageLinks}
               pageByTitle={pageByTitle}
               openPage={openPage}
               openGraph={openGraph}
@@ -364,7 +451,8 @@ export default function Home() {
 
       <footer className="statusbar">
         <span>{pages.length} pages</span>
-        <span>{links.length} links</span>
+        <span>{graphNodes.length} nodes</span>
+        <span>{graphEdges.length} edges</span>
         {connectionStatus ? (
           <span className={`statusbar__connection statusbar__connection--${connectionStatus}`}>
             {connectionStatus}
@@ -394,43 +482,45 @@ function TreeItem({
 
 function HomeView({
   pages,
-  links,
   loading,
   error,
-  refreshWiki,
-  openPage,
-  openGraph
+  openPage
 }: {
   pages: WikiPage[];
-  links: WikiLink[];
   loading: boolean;
   error: string;
-  refreshWiki: () => Promise<void>;
   openPage: (id: string) => void;
-  openGraph: (focusId?: string) => void;
 }) {
   const recentPages = pages.slice(0, 8);
-  const linkedPages = getMostLinkedPages(pages, links).slice(0, 6);
   const updatedAt = pages[0]?.updatedAt;
   const showEmpty = loading || error || pages.length === 0;
-  const emptyTitle = loading ? "Opening wiki" : error ? "Wiki is offline" : "Start with one page";
+  const emptyTitle = loading ? "Opening wiki" : error ? "Offline" : "Start with one page";
   const emptyCopy = loading
     ? "Checking the workspace."
     : error
-      ? "Start the wiki server, then refresh this view."
-      : "Pages, notes, chats, and sources will appear here as the wiki grows.";
-  const lede =
-    pages.length > 0
-      ? `${pages.length} pages and ${links.length} graph links.`
-      : "A workspace for pages, notes, chats, and sources.";
+      ? "The workspace service is not reachable."
+      : "Pages, notes, sources, and entities will appear as the wiki grows.";
+  const updatedLabel = updatedAt ? formatDate(updatedAt) : "none";
 
   return (
     <section className="home-view">
-      <div className="home-view__date">
-        {loading ? "loading" : updatedAt ? formatDateTime(updatedAt) : "wiki"}
+      <div className="home-view__date">{loading ? "loading" : "personal wiki"}</div>
+      <div className="home-view__header">
+        <div>
+          <h1>Recent pages</h1>
+          <p className="home-view__lede">Latest changes across the wiki.</p>
+        </div>
+        <dl className="home-view__stats">
+          <div>
+            <dt>pages</dt>
+            <dd>{pages.length}</dd>
+          </div>
+          <div>
+            <dt>updated</dt>
+            <dd>{updatedLabel}</dd>
+          </div>
+        </dl>
       </div>
-      <h1>Personal wiki</h1>
-      <p className="home-view__lede">{lede}</p>
 
       {showEmpty ? (
         <div className="empty-state">
@@ -452,62 +542,33 @@ function HomeView({
       ) : null}
 
       {pages.length > 0 ? (
-        <>
-          <div className="home-grid">
-            <section className="home-block">
-              <div className="section-title">
-                <h2>recent</h2>
-                <button type="button" onClick={() => void refreshWiki()}>
-                  refresh
-                </button>
-              </div>
-              <div className="row-list">
-                {recentPages.map((page) => (
-                  <button
-                    key={page.id}
-                    className="row-link"
-                    type="button"
-                    onClick={() => openPage(page.id)}
-                  >
-                    <KindDot kind={page.kind} />
-                    <span>{page.title}</span>
-                    <span>{formatDate(page.updatedAt)}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="home-block">
-              <div className="section-title">
-                <h2>linked</h2>
-                <span>{linkedPages.length}</span>
-              </div>
-              <div className="row-list">
-                {linkedPages.length > 0 ? (
-                  linkedPages.map(({ page, count }) => (
-                    <button
-                      key={page.id}
-                      className="row-link"
-                      type="button"
-                      onClick={() => openPage(page.id)}
-                    >
-                      <KindDot kind={page.kind} />
-                      <span>{page.title}</span>
-                      <span>{count}</span>
-                    </button>
-                  ))
-                ) : (
-                  <p className="empty-copy">Waiting for links.</p>
-                )}
-              </div>
-            </section>
+        <section className="home-block home-block--recent">
+          <div className="recent-list">
+            <div className="recent-list__head">
+              <span>page</span>
+              <span>agent</span>
+              <span>updated</span>
+            </div>
+            {recentPages.map((page) => (
+              <button
+                key={page.id}
+                className="recent-row"
+                type="button"
+                onClick={() => openPage(page.id)}
+              >
+                <span className="recent-row__page">
+                  <KindDot kind={page.kind} />
+                  <span>
+                    <strong>{page.title}</strong>
+                    <small>{page.kind}</small>
+                  </span>
+                </span>
+                <span className="recent-row__agent">{page.createdByAgentId ?? "manual"}</span>
+                <span className="recent-row__date">{formatDate(page.updatedAt)}</span>
+              </button>
+            ))}
           </div>
-
-          <button className="graph-strip" type="button" onClick={() => openGraph(pages[0]?.id)}>
-            <span>open graph</span>
-            <span>{links.length} links</span>
-          </button>
-        </>
+        </section>
       ) : null}
     </section>
   );
@@ -517,7 +578,6 @@ function EntityPage({
   page,
   pages,
   links,
-  pageById,
   pageByTitle,
   openPage,
   openGraph
@@ -525,24 +585,35 @@ function EntityPage({
   page: WikiPage;
   pages: WikiPage[];
   links: WikiLink[];
-  pageById: Map<string, WikiPage>;
   pageByTitle: Map<string, WikiPage>;
   openPage: (id: string) => void;
   openGraph: (focusId?: string) => void;
 }) {
-  const outgoingPages = getOutgoingPages(page.id, links, pageById);
-  const backlinkPages = getBacklinkPages(page.id, links, pageById);
   const relatedPages = getRelatedPages(page.id, pages, links);
+  const linkCount = links.filter(
+    (link) => link.fromPageId === page.id || link.toPageId === page.id
+  ).length;
 
   return (
     <article className="entity-page">
       <header className="entity-page__header">
-        <div className="entity-page__kind">
-          <KindDot kind={page.kind} />
-          <span>
-            {page.kind}
-            {page.sourceType ? ` - ${page.sourceType}` : ""}
-          </span>
+        <div className="entity-page__topline">
+          <div className="entity-page__kind">
+            <KindDot kind={page.kind} />
+            <span>
+              {page.kind}
+              {page.sourceType ? ` - ${page.sourceType}` : ""}
+            </span>
+          </div>
+          <button
+            className="entity-page__graph-action"
+            type="button"
+            onClick={() => openGraph(pageNodeId(page.id))}
+            title="Open this page in the graph"
+            aria-label={`View ${page.title} neighborhood`}
+          >
+            ✺
+          </button>
         </div>
         <h1>{page.title}</h1>
         {page.summary ? <p className="entity-page__lede">{page.summary}</p> : null}
@@ -551,11 +622,7 @@ function EntityPage({
             {page.sourceUrl}
           </a>
         ) : null}
-        <MetadataRow
-          page={page}
-          relatedCount={relatedPages.length}
-          linkCount={outgoingPages.length + backlinkPages.length}
-        />
+        <MetadataRow page={page} linkCount={linkCount} />
       </header>
 
       {page.body ? (
@@ -592,41 +659,16 @@ function EntityPage({
           </div>
         </section>
       ) : null}
-
-      <section className="entity-section">
-        <div className="section-title">
-          <h2>graph</h2>
-          <button type="button" onClick={() => openGraph(page.id)}>
-            open neighborhood
-          </button>
-        </div>
-        <LinkColumns
-          outgoingPages={outgoingPages}
-          backlinkPages={backlinkPages}
-          openPage={openPage}
-        />
-      </section>
     </article>
   );
 }
 
-function MetadataRow({
-  page,
-  relatedCount,
-  linkCount
-}: {
-  page: WikiPage;
-  relatedCount: number;
-  linkCount: number;
-}) {
-  const items: Array<[string, string]> = [
-    ["updated", formatDate(page.updatedAt)],
-    ["status", page.status]
-  ];
+function MetadataRow({ page, linkCount }: { page: WikiPage; linkCount: number }) {
+  const items: Array<[string, string]> = [];
 
-  if (page.trust) items.push(["trust", page.trust]);
   if (page.createdByAgentId) items.push(["agent", page.createdByAgentId]);
-  if (relatedCount > 0) items.push(["related", String(relatedCount)]);
+  items.push(["updated", formatDate(page.updatedAt)]);
+  if (page.trust) items.push(["trust", page.trust]);
   if (linkCount > 0) items.push(["links", String(linkCount)]);
 
   return (
@@ -714,227 +756,132 @@ function renderInline(
   return parts;
 }
 
-function LinkColumns({
-  outgoingPages,
-  backlinkPages,
-  openPage
-}: {
-  outgoingPages: WikiPage[];
-  backlinkPages: WikiPage[];
-  openPage: (id: string) => void;
-}) {
-  return (
-    <div className="link-columns">
-      <LinkColumn title="outgoing" pages={outgoingPages} openPage={openPage} />
-      <LinkColumn title="backlinks" pages={backlinkPages} openPage={openPage} />
-    </div>
-  );
-}
-
-function LinkColumn({
-  title,
-  pages,
-  openPage
-}: {
-  title: string;
-  pages: WikiPage[];
-  openPage: (id: string) => void;
-}) {
-  return (
-    <div className="link-column">
-      <h3>
-        {title} <span>{pages.length}</span>
-      </h3>
-      {pages.length > 0 ? (
-        pages.map((page) => (
-          <button
-            key={page.id}
-            className="link-row"
-            type="button"
-            onClick={() => openPage(page.id)}
-          >
-            <KindDot kind={page.kind} />
-            <span>{page.title}</span>
-            <span>{page.kind}</span>
-          </button>
-        ))
-      ) : (
-        <p>None.</p>
-      )}
-    </div>
-  );
-}
-
 function GraphView({
-  pages,
-  links,
-  pageById,
+  nodes,
+  edges,
+  nodeById,
   focusId,
   setFocusId,
-  openPage
+  openGraphNode
 }: {
-  pages: WikiPage[];
-  links: WikiLink[];
-  pageById: Map<string, WikiPage>;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  nodeById: Map<string, GraphNode>;
   focusId: string;
   setFocusId: (id: string) => void;
-  openPage: (id: string) => void;
+  openGraphNode: (id: string) => void;
 }) {
-  const layout = useMemo(() => buildGraphLayout(pages, links), [pages, links]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const cyRef = useRef<Cytoscape.Core | null>(null);
+  const openGraphNodeRef = useRef(openGraphNode);
+  const setFocusIdRef = useRef(setFocusId);
+  const activeFocusRef = useRef(focusId);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [showLegend, setShowLegend] = useState(false);
-  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(
-    null
-  );
 
   useEffect(() => {
-    function stopDrag() {
-      dragRef.current = null;
-    }
+    openGraphNodeRef.current = openGraphNode;
+  }, [openGraphNode]);
 
-    window.addEventListener("mouseup", stopDrag);
-    return () => window.removeEventListener("mouseup", stopDrag);
-  }, []);
+  useEffect(() => {
+    setFocusIdRef.current = setFocusId;
+  }, [setFocusId]);
 
-  const highlightedIds = useMemo(() => {
-    const rootId = hoverId ?? focusId;
-    const ids = new Set<string>();
-    if (!rootId) return ids;
-    ids.add(rootId);
-    for (const edge of layout.edges) {
-      const from = layout.nodes[edge.s];
-      const to = layout.nodes[edge.t];
-      if (!from || !to) continue;
-      if (from.id === rootId) ids.add(to.id);
-      if (to.id === rootId) ids.add(from.id);
-    }
-    return ids;
-  }, [focusId, hoverId, layout]);
+  useEffect(() => {
+    activeFocusRef.current = hoverId ?? focusId;
+    applyCytoscapeFocus(cyRef.current, activeFocusRef.current);
+  }, [focusId, hoverId]);
 
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const node of layout.nodes) {
+    for (const node of nodes) {
       counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
     }
     return [...counts.entries()].sort((left, right) => left[0].localeCompare(right[0]));
-  }, [layout.nodes]);
+  }, [nodes]);
 
-  function onMouseDown(event: ReactMouseEvent<SVGSVGElement>) {
-    const target = event.target as Element;
-    if (target.closest(".graph-node")) return;
-    dragRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      panX: pan.x,
-      panY: pan.y
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || nodes.length === 0) return;
+
+    let cancelled = false;
+    let instance: Cytoscape.Core | null = null;
+
+    void import("cytoscape").then(({ default: cytoscape }) => {
+      if (cancelled) return;
+
+      instance = cytoscape({
+        container,
+        elements: buildCytoscapeElements(nodes, edges),
+        style: cytoscapeStylesheet,
+        layout: {
+          name: "cose",
+          animate: false,
+          fit: true,
+          padding: 120,
+          componentSpacing: 110,
+          idealEdgeLength: 120,
+          nodeOverlap: 12,
+          nodeRepulsion: 9000,
+          nestingFactor: 1.15,
+          gravity: 0.75,
+          numIter: 1800
+        },
+        minZoom: 0.25,
+        maxZoom: 3,
+        wheelSensitivity: 0.16,
+        boxSelectionEnabled: false,
+        autoungrabify: false,
+        userPanningEnabled: true,
+        userZoomingEnabled: true
+      });
+
+      cyRef.current = instance;
+      instance.on("tap", "node", (event) => {
+        const id = event.target.id();
+        setFocusIdRef.current(id);
+        openGraphNodeRef.current(id);
+      });
+      instance.on("mouseover", "node", (event) => {
+        const id = event.target.id();
+        setHoverId(id);
+        setFocusIdRef.current(id);
+      });
+      instance.on("mouseout", "node", () => setHoverId(null));
+      instance.on("drag", "node", (event) => {
+        const id = event.target.id();
+        setFocusIdRef.current(id);
+      });
+      instance.on("zoom pan", () => setZoom(instance?.zoom() ?? 1));
+      instance.one("layoutstop", () => {
+        instance?.fit(undefined, 120);
+        instance?.center();
+        setZoom(instance?.zoom() ?? 1);
+      });
+
+      applyCytoscapeFocus(instance, activeFocusRef.current);
+    });
+
+    return () => {
+      cancelled = true;
+      instance?.destroy();
+      if (cyRef.current === instance) cyRef.current = null;
     };
-    event.preventDefault();
-  }
-
-  function onMouseMove(event: ReactMouseEvent<SVGSVGElement>) {
-    if (!dragRef.current) return;
-    const dx = event.clientX - dragRef.current.startX;
-    const dy = event.clientY - dragRef.current.startY;
-    setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
-  }
-
-  function onWheel(event: WheelEvent<SVGSVGElement>) {
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -0.08 : 0.08;
-    setZoom((current) => Math.max(0.35, Math.min(2.5, current + delta)));
-  }
+  }, [edges, nodes]);
 
   return (
     <section className="graph-view">
       <div className="graph">
-        {layout.nodes.length > 0 ? (
-          <svg
-            viewBox={`0 0 ${layout.width} ${layout.height}`}
-            preserveAspectRatio="xMidYMid meet"
-            role="img"
-            aria-label="Wiki graph"
-            onMouseDown={onMouseDown}
-            onMouseMove={onMouseMove}
-            onMouseUp={() => {
-              dragRef.current = null;
-            }}
-            onWheel={onWheel}
-            style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
-          >
-            <defs>
-              <pattern
-                id="graph-dots"
-                x="0"
-                y="0"
-                width="40"
-                height="40"
-                patternUnits="userSpaceOnUse"
-              >
-                <circle cx="0.6" cy="0.6" r="0.6" fill="rgba(120,130,140,0.14)" />
-              </pattern>
-            </defs>
-            <rect x="0" y="0" width={layout.width} height={layout.height} fill="url(#graph-dots)" />
-            <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-              {layout.edges.map((edge) => {
-                const from = layout.nodes[edge.s];
-                const to = layout.nodes[edge.t];
-                if (!from || !to) return null;
-                const isHighlighted =
-                  highlightedIds.size === 0 ||
-                  (highlightedIds.has(from.id) && highlightedIds.has(to.id));
-                return (
-                  <line
-                    key={edge.id}
-                    className="graph-edge"
-                    x1={from.x}
-                    y1={from.y}
-                    x2={to.x}
-                    y2={to.y}
-                    opacity={isHighlighted ? 1 : 0.18}
-                  />
-                );
-              })}
-              {layout.nodes.map((node) => {
-                const isHighlighted = highlightedIds.size === 0 || highlightedIds.has(node.id);
-                const isFocus = node.id === focusId;
-                return (
-                  <g
-                    key={node.id}
-                    className="graph-node"
-                    transform={`translate(${node.x},${node.y})`}
-                    onMouseEnter={() => {
-                      setHoverId(node.id);
-                      setFocusId(node.id);
-                    }}
-                    onMouseLeave={() => setHoverId(null)}
-                    onClick={() => openPage(node.id)}
-                  >
-                    {isFocus ? (
-                      <circle className="graph-node__ring" r={node.r + 6} opacity={0.85} />
-                    ) : null}
-                    <circle
-                      className="graph-node__circle"
-                      r={node.r}
-                      opacity={isHighlighted ? 0.95 : 0.22}
-                      style={kindStyle(node.kind)}
-                    />
-                    <text x={node.r + 6} y="3" opacity={isHighlighted ? 1 : 0.35}>
-                      {node.title}
-                    </text>
-                  </g>
-                );
-              })}
-            </g>
-          </svg>
+        {nodes.length > 0 ? (
+          <div ref={containerRef} className="graph__cy" role="img" aria-label="Wiki graph" />
         ) : (
-          <div className="graph-empty">Graph appears after pages connect.</div>
+          <div className="graph-empty">No graph nodes yet.</div>
         )}
 
         <div className="graph__title">
           <span>graph</span>
-          <strong>{pageById.get(focusId)?.title ?? "Personal wiki"}</strong>
+          <strong>{nodeById.get(focusId)?.title ?? "Personal wiki"}</strong>
         </div>
 
         <button
@@ -961,41 +908,175 @@ function GraphView({
 
         <div className="graph__hud">
           <div>
-            nodes <b>{layout.nodes.length}</b>
+            nodes <b>{nodes.length}</b>
           </div>
           <div>
-            edges <b>{layout.edges.length}</b>
+            edges <b>{edges.length}</b>
           </div>
           <div>
             zoom <b>{zoom.toFixed(2)}x</b>
           </div>
           {focusId ? (
             <div>
-              focus <b>{pageById.get(focusId)?.title ?? focusId}</b>
+              focus <b>{nodeById.get(focusId)?.title ?? focusId}</b>
             </div>
           ) : null}
         </div>
 
         <div className="graph__zoom">
-          <button type="button" onClick={() => setZoom((current) => Math.max(0.35, current - 0.1))}>
+          <button
+            type="button"
+            onClick={() => {
+              const nextZoom = Math.max(0.25, (cyRef.current?.zoom() ?? zoom) - 0.15);
+              cyRef.current?.zoom(nextZoom);
+              setZoom(nextZoom);
+            }}
+          >
             -
           </button>
           <button
             type="button"
             onClick={() => {
-              setZoom(1);
-              setPan({ x: 0, y: 0 });
+              cyRef.current?.fit(undefined, 80);
+              setZoom(cyRef.current?.zoom() ?? 1);
             }}
           >
             o
           </button>
-          <button type="button" onClick={() => setZoom((current) => Math.min(2.5, current + 0.1))}>
+          <button
+            type="button"
+            onClick={() => {
+              const nextZoom = Math.min(3, (cyRef.current?.zoom() ?? zoom) + 0.15);
+              cyRef.current?.zoom(nextZoom);
+              setZoom(nextZoom);
+            }}
+          >
             +
           </button>
         </div>
       </div>
     </section>
   );
+}
+
+function buildCytoscapeElements(
+  nodes: GraphNode[],
+  edges: GraphEdge[]
+): Cytoscape.ElementDefinition[] {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const degrees = new Map<string, number>();
+  const visibleEdges = edges.filter(
+    (edge) => nodeIds.has(edge.fromNodeId) && nodeIds.has(edge.toNodeId)
+  );
+
+  for (const edge of visibleEdges) {
+    degrees.set(edge.fromNodeId, (degrees.get(edge.fromNodeId) ?? 0) + 1);
+    degrees.set(edge.toNodeId, (degrees.get(edge.toNodeId) ?? 0) + 1);
+  }
+
+  return [
+    ...nodes.map((node) => ({
+      data: {
+        id: node.id,
+        label: shortGraphLabel(node.title),
+        kind: node.kind,
+        subtype: node.subtype ?? node.kind,
+        color: colorForKind(node.subtype ?? node.kind),
+        size: sizeForGraphNode(degrees.get(node.id) ?? 0)
+      },
+      grabbable: true,
+      selectable: true
+    })),
+    ...visibleEdges.map((edge) => ({
+      data: {
+        id: edge.id,
+        source: edge.fromNodeId,
+        target: edge.toNodeId,
+        kind: edge.kind
+      },
+      selectable: false
+    }))
+  ];
+}
+
+const cytoscapeStylesheet: Cytoscape.StylesheetJson = [
+  {
+    selector: "node",
+    style: {
+      width: "data(size)",
+      height: "data(size)",
+      "background-color": "data(color)",
+      "border-width": 0,
+      label: "data(label)",
+      color: "#b9b2a0",
+      "font-family":
+        "JetBrains Mono, IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      "font-size": 10,
+      "min-zoomed-font-size": 7,
+      "overlay-opacity": 0,
+      "text-background-color": "#171716",
+      "text-background-opacity": 0.72,
+      "text-background-padding": "2px",
+      "text-halign": "center",
+      "text-margin-y": 7,
+      "text-valign": "bottom"
+    }
+  },
+  {
+    selector: "edge",
+    style: {
+      width: 0.9,
+      "curve-style": "haystack",
+      "haystack-radius": 0,
+      "line-color": "#ece7d9",
+      opacity: 0.22
+    }
+  },
+  {
+    selector: "node.is-focus",
+    style: {
+      "border-color": "#c8b574",
+      "border-opacity": 1,
+      "border-width": 2,
+      color: "#ece7d9",
+      "text-background-opacity": 0.88,
+      "z-index": 20
+    }
+  },
+  {
+    selector: ".is-neighbor",
+    style: {
+      opacity: 1
+    }
+  },
+  {
+    selector: ".is-dimmed",
+    style: {
+      opacity: 0.16,
+      "text-opacity": 0.24
+    }
+  }
+];
+
+function applyCytoscapeFocus(cy: Cytoscape.Core | null, focusId: string): void {
+  if (!cy) return;
+
+  const elements = cy.elements();
+  elements.removeClass("is-dimmed is-neighbor is-focus");
+  if (!focusId) return;
+
+  const focus = cy.getElementById(focusId);
+  if (focus.empty()) return;
+
+  const neighborhood = focus.closedNeighborhood();
+  elements.difference(neighborhood).addClass("is-dimmed");
+  neighborhood.addClass("is-neighbor");
+  focus.addClass("is-focus");
+}
+
+function shortGraphLabel(value: string): string {
+  if (value.length <= 42) return value;
+  return `${value.slice(0, 39)}...`;
 }
 
 function filterSearchItems(pages: WikiPage[], query: string, linkCount: number): SearchItem[] {
@@ -1067,36 +1148,45 @@ function humanizeKind(kind: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-function getBreadcrumb(view: ViewState, activePage: WikiPage | undefined): string[] {
-  if (view.mode === "home") return ["wiki"];
-  if (view.mode === "graph") return ["wiki", "graph"];
-  return ["wiki", activePage?.kind ?? "page", activePage?.title ?? view.id];
+function getBreadcrumb({
+  view,
+  activePage,
+  graphNodes,
+  graphFocusId,
+  nodeById,
+  openHome,
+  openGraph
+}: {
+  view: ViewState;
+  activePage: WikiPage | undefined;
+  graphNodes: GraphNode[];
+  graphFocusId: string;
+  nodeById: Map<string, GraphNode>;
+  openHome: () => void;
+  openGraph: (focusId?: string) => void;
+}): BreadcrumbItem[] {
+  const home = { label: "wiki", action: view.mode === "home" ? undefined : openHome };
+
+  if (view.mode === "home") return [home];
+  if (view.mode === "graph") {
+    return [home, { label: nodeById.get(graphFocusId)?.title ?? "graph" }];
+  }
+
+  const graphAction =
+    graphNodes.length > 0
+      ? () => openGraph(activePage ? pageNodeId(activePage.id) : graphFocusId)
+      : undefined;
+
+  return [home, { label: "graph", action: graphAction }, { label: activePage?.title ?? view.id }];
 }
 
-function getOutgoingPages(
-  pageId: string,
-  links: WikiLink[],
-  pageById: Map<string, WikiPage>
-): WikiPage[] {
-  return uniquePages(
-    links
-      .filter((link) => link.fromPageId === pageId)
-      .map((link) => pageById.get(link.toPageId))
-      .filter((page): page is WikiPage => Boolean(page))
-  );
+function metadataPageId(node: GraphNode): string | undefined {
+  const pageId = node.metadata.pageId;
+  return typeof pageId === "string" ? pageId : undefined;
 }
 
-function getBacklinkPages(
-  pageId: string,
-  links: WikiLink[],
-  pageById: Map<string, WikiPage>
-): WikiPage[] {
-  return uniquePages(
-    links
-      .filter((link) => link.toPageId === pageId)
-      .map((link) => pageById.get(link.fromPageId))
-      .filter((page): page is WikiPage => Boolean(page))
-  );
+function pageNodeId(pageId: string): string {
+  return `page:${pageId}`;
 }
 
 function getRelatedPages(pageId: string, pages: WikiPage[], links: WikiLink[]): WikiPage[] {
@@ -1112,140 +1202,12 @@ function getRelatedPages(pageId: string, pages: WikiPage[], links: WikiLink[]): 
     .sort((left, right) => left.title.localeCompare(right.title));
 }
 
-function getMostLinkedPages(pages: WikiPage[], links: WikiLink[]) {
-  const counts = new Map<string, number>();
-  for (const link of links) {
-    counts.set(link.fromPageId, (counts.get(link.fromPageId) ?? 0) + 1);
-    counts.set(link.toPageId, (counts.get(link.toPageId) ?? 0) + 1);
-  }
-  return pages
-    .map((page) => ({ page, count: counts.get(page.id) ?? 0 }))
-    .filter((item) => item.count > 0)
-    .sort(
-      (left, right) => right.count - left.count || left.page.title.localeCompare(right.page.title)
-    );
-}
-
-function uniquePages(pages: WikiPage[]): WikiPage[] {
-  return [...new Map(pages.map((page) => [page.id, page])).values()].sort((left, right) =>
-    left.title.localeCompare(right.title)
-  );
-}
-
-function buildGraphLayout(pages: WikiPage[], links: WikiLink[]) {
-  const width = 1200;
-  const height = 760;
-  const visiblePages = pages.slice(0, 500);
-  const count = Math.max(1, visiblePages.length);
-  const nodes = visiblePages.map((page, index) => {
-    const angle = index * 2.399963229728653;
-    const spread = Math.sqrt(index + 1) / Math.sqrt(count);
-    const radius = Math.min(width, height) * 0.39 * spread;
-    return {
-      ...page,
-      x: width / 2 + Math.cos(angle) * radius,
-      y: height / 2 + Math.sin(angle) * radius,
-      vx: 0,
-      vy: 0,
-      r: sizeForPage(page, links)
-    };
-  });
-  const nodeIndex = new Map(nodes.map((node, index) => [node.id, index]));
-  const edges = links
-    .map((link) => {
-      const s = nodeIndex.get(link.fromPageId);
-      const t = nodeIndex.get(link.toPageId);
-      if (s === undefined || t === undefined) return null;
-      return { ...link, s, t };
-    })
-    .filter((edge): edge is WikiLink & { s: number; t: number } => Boolean(edge));
-
-  const iterations = Math.min(260, Math.max(120, nodes.length * 6));
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
-        const left = nodes[leftIndex];
-        const right = nodes[rightIndex];
-        if (!left || !right) continue;
-        let dx = left.x - right.x;
-        let dy = left.y - right.y;
-        const distanceSquared = dx * dx + dy * dy + 0.01;
-        const distance = Math.sqrt(distanceSquared);
-        if (distance > 320) continue;
-        const force = 6200 / distanceSquared;
-        dx /= distance;
-        dy /= distance;
-        left.vx += dx * force;
-        left.vy += dy * force;
-        right.vx -= dx * force;
-        right.vy -= dy * force;
-      }
-    }
-
-    for (const edge of edges) {
-      const from = nodes[edge.s];
-      const to = nodes[edge.t];
-      if (!from || !to) continue;
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const distance = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const target = 126;
-      const force = (distance - target) * 0.018;
-      const ux = dx / distance;
-      const uy = dy / distance;
-      from.vx += ux * force;
-      from.vy += uy * force;
-      to.vx -= ux * force;
-      to.vy -= uy * force;
-    }
-
-    for (const node of nodes) {
-      node.vx += (width / 2 - node.x) * 0.0013;
-      node.vy += (height / 2 - node.y) * 0.0013;
-      node.vx *= 0.78;
-      node.vy *= 0.78;
-      node.x = clamp(node.x + node.vx, 32, width - 32);
-      node.y = clamp(node.y + node.vy, 32, height - 32);
-    }
-  }
-
-  return {
-    width,
-    height,
-    nodes: nodes.map((node) => ({
-      ...node,
-      x: Math.round(node.x),
-      y: Math.round(node.y)
-    })),
-    edges
-  };
-}
-
-function sizeForPage(page: WikiPage, links: WikiLink[] = []): number {
-  const degree = links.filter(
-    (link) => link.fromPageId === page.id || link.toPageId === page.id
-  ).length;
-  return 8 + Math.min(12, degree * 2);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+function sizeForGraphNode(degree: number): number {
+  return 18 + Math.min(24, degree * 2.4);
 }
 
 function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit" }).format(date);
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en", {
-    weekday: "short",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(date);
 }
