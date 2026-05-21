@@ -108,6 +108,29 @@ type BreadcrumbItem = {
   action?: () => void;
 };
 
+type OutlineItem = {
+  id: string;
+  level: 2 | 3;
+  title: string;
+};
+
+type ProseBlock =
+  | {
+      kind: "heading";
+      id: string;
+      level: 2 | 3 | 4 | 5 | 6;
+      text: string;
+    }
+  | {
+      kind: "paragraph";
+      text: string;
+    };
+
+type ParsedPageBody = {
+  blocks: ProseBlock[];
+  outline: OutlineItem[];
+};
+
 const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "/wiki-api";
 
 export default function Home() {
@@ -593,71 +616,128 @@ function EntityPage({
   const linkCount = links.filter(
     (link) => link.fromPageId === page.id || link.toPageId === page.id
   ).length;
+  const parsedBody = useMemo(() => parsePageBody(page.body, page.title), [page.body, page.title]);
+  const showOutline = parsedBody.outline.length >= 2;
+  const [activeOutlineId, setActiveOutlineId] = useState(parsedBody.outline[0]?.id ?? "");
+
+  useEffect(() => {
+    if (parsedBody.outline.length === 0) {
+      setActiveOutlineId("");
+      return;
+    }
+
+    setActiveOutlineId((current) =>
+      parsedBody.outline.some((item) => item.id === current)
+        ? current
+        : (parsedBody.outline[0]?.id ?? "")
+    );
+
+    const main = document.querySelector<HTMLElement>(".main");
+    const mainOverflow = main ? window.getComputedStyle(main).overflowY : "";
+    const root = main && mainOverflow !== "visible" ? main : null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+
+        const topEntry = visibleEntries[0];
+        if (topEntry) setActiveOutlineId(topEntry.target.id);
+      },
+      { root, rootMargin: "-18% 0px -68% 0px", threshold: [0, 1] }
+    );
+
+    for (const item of parsedBody.outline) {
+      const element = document.getElementById(item.id);
+      if (element) observer.observe(element);
+    }
+
+    return () => observer.disconnect();
+  }, [page.id, parsedBody.outline]);
 
   return (
-    <article className="entity-page">
-      <header className="entity-page__header">
-        <div className="entity-page__topline">
-          <div className="entity-page__kind">
-            <KindDot kind={page.kind} />
-            <span>
-              {page.kind}
-              {page.sourceType ? ` - ${page.sourceType}` : ""}
-            </span>
+    <article className={`entity-page ${showOutline ? "entity-page--with-outline" : ""}`}>
+      <div className="entity-page__content">
+        <header className="entity-page__header">
+          <div className="entity-page__topline">
+            <div className="entity-page__kind">
+              <KindDot kind={page.kind} />
+              <span>
+                {page.kind}
+                {page.sourceType ? ` - ${page.sourceType}` : ""}
+              </span>
+            </div>
+            <button
+              className="entity-page__graph-action"
+              type="button"
+              onClick={() => openGraph(pageNodeId(page.id))}
+              title="Open this page in the graph"
+              aria-label={`View ${page.title} neighborhood`}
+            >
+              ✺
+            </button>
           </div>
-          <button
-            className="entity-page__graph-action"
-            type="button"
-            onClick={() => openGraph(pageNodeId(page.id))}
-            title="Open this page in the graph"
-            aria-label={`View ${page.title} neighborhood`}
-          >
-            ✺
-          </button>
-        </div>
-        <h1>{page.title}</h1>
-        {page.summary ? <p className="entity-page__lede">{page.summary}</p> : null}
-        {page.sourceUrl ? (
-          <a className="entity-page__url" href={page.sourceUrl} target="_blank" rel="noreferrer">
-            {page.sourceUrl}
-          </a>
+          <h1>{page.title}</h1>
+          {page.summary ? <p className="entity-page__lede">{page.summary}</p> : null}
+          {page.sourceUrl ? (
+            <a className="entity-page__url" href={page.sourceUrl} target="_blank" rel="noreferrer">
+              {page.sourceUrl}
+            </a>
+          ) : null}
+          <MetadataRow page={page} linkCount={linkCount} />
+        </header>
+
+        {showOutline ? (
+          <PageOutline
+            items={parsedBody.outline}
+            activeId={activeOutlineId}
+            setActiveId={setActiveOutlineId}
+          />
         ) : null}
-        <MetadataRow page={page} linkCount={linkCount} />
-      </header>
 
-      {page.body ? (
-        <section className="entity-section entity-section--prose">
-          <WikiProse body={page.body} pageByTitle={pageByTitle} openPage={openPage} />
-        </section>
-      ) : (
-        <section className="entity-section">
-          <p className="empty-copy">No body.</p>
-        </section>
-      )}
+        {page.body ? (
+          <section className="entity-section entity-section--prose">
+            <WikiProse blocks={parsedBody.blocks} pageByTitle={pageByTitle} openPage={openPage} />
+          </section>
+        ) : (
+          <section className="entity-section">
+            <p className="empty-copy">No body.</p>
+          </section>
+        )}
 
-      {relatedPages.length > 0 ? (
-        <section className="entity-section">
-          <div className="section-title">
-            <h2>related</h2>
-            <span>{relatedPages.length}</span>
-          </div>
-          <div className="card-list">
-            {relatedPages.map((relatedPage) => (
-              <button
-                key={relatedPage.id}
-                className="card-row"
-                type="button"
-                onClick={() => openPage(relatedPage.id)}
-              >
-                <span>
-                  <strong>{relatedPage.title}</strong>
-                  <small>{relatedPage.sourceType ?? relatedPage.kind}</small>
-                </span>
-                <span>{formatDate(relatedPage.updatedAt)}</span>
-              </button>
-            ))}
-          </div>
-        </section>
+        {relatedPages.length > 0 ? (
+          <section className="entity-section">
+            <div className="section-title">
+              <h2>related</h2>
+              <span>{relatedPages.length}</span>
+            </div>
+            <div className="card-list">
+              {relatedPages.map((relatedPage) => (
+                <button
+                  key={relatedPage.id}
+                  className="card-row"
+                  type="button"
+                  onClick={() => openPage(relatedPage.id)}
+                >
+                  <span>
+                    <strong>{relatedPage.title}</strong>
+                    <small>{relatedPage.sourceType ?? relatedPage.kind}</small>
+                  </span>
+                  <span>{formatDate(relatedPage.updatedAt)}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
+
+      {showOutline ? (
+        <PageOutline
+          items={parsedBody.outline}
+          activeId={activeOutlineId}
+          setActiveId={setActiveOutlineId}
+          variant="rail"
+        />
       ) : null}
     </article>
   );
@@ -684,23 +764,165 @@ function MetadataRow({ page, linkCount }: { page: WikiPage; linkCount: number })
 }
 
 function WikiProse({
-  body,
+  blocks,
   pageByTitle,
   openPage
 }: {
-  body: string;
+  blocks: ProseBlock[];
   pageByTitle: Map<string, WikiPage>;
   openPage: (id: string) => void;
 }) {
   return (
     <div className="prose">
-      {body.split(/\n\n+/).map((paragraph, index) => (
-        <p key={`${paragraph.slice(0, 24)}-${index}`}>
-          {renderInline(paragraph, pageByTitle, openPage)}
-        </p>
-      ))}
+      {blocks.map((block, index) =>
+        block.kind === "heading" ? (
+          <ProseHeading key={block.id} block={block} />
+        ) : (
+          <p key={`${block.text.slice(0, 24)}-${index}`}>
+            {renderInline(block.text, pageByTitle, openPage)}
+          </p>
+        )
+      )}
     </div>
   );
+}
+
+function ProseHeading({ block }: { block: Extract<ProseBlock, { kind: "heading" }> }) {
+  const content = (
+    <a href={`#${block.id}`} aria-label={`Link to ${block.text}`}>
+      {block.text}
+    </a>
+  );
+
+  if (block.level === 2) return <h2 id={block.id}>{content}</h2>;
+  if (block.level === 3) return <h3 id={block.id}>{content}</h3>;
+  if (block.level === 4) return <h4 id={block.id}>{content}</h4>;
+  if (block.level === 5) return <h5 id={block.id}>{content}</h5>;
+  return <h6 id={block.id}>{content}</h6>;
+}
+
+function PageOutline({
+  items,
+  activeId,
+  setActiveId,
+  variant = "inline"
+}: {
+  items: OutlineItem[];
+  activeId: string;
+  setActiveId: (id: string) => void;
+  variant?: "inline" | "rail";
+}) {
+  return (
+    <nav className={`page-outline page-outline--${variant}`} aria-label="Page outline">
+      <div className="page-outline__title">outline</div>
+      <div className="page-outline__items">
+        {items.map((item) => (
+          <a
+            key={item.id}
+            className={`page-outline__item page-outline__item--h${item.level} ${
+              activeId === item.id ? "is-active" : ""
+            }`}
+            href={`#${item.id}`}
+            onClick={(event) => {
+              event.preventDefault();
+              setActiveId(item.id);
+              document.getElementById(item.id)?.scrollIntoView({
+                block: "start",
+                behavior: "smooth"
+              });
+              window.history.replaceState(
+                null,
+                "",
+                `${window.location.pathname}${window.location.search}#${item.id}`
+              );
+            }}
+          >
+            {item.title}
+          </a>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function parsePageBody(body: string, pageTitle: string): ParsedPageBody {
+  const blocks: ProseBlock[] = [];
+  const outline: OutlineItem[] = [];
+  const usedIds = new Map<string, number>();
+
+  for (const rawBlock of body.split(/\n\n+/)) {
+    const text = rawBlock.trim();
+    if (!text) continue;
+
+    const heading = parseMarkdownHeading(text);
+    if (heading) {
+      if (
+        heading.level === 1 &&
+        normalizeHeadingText(heading.title) === normalizeHeadingText(pageTitle)
+      ) {
+        continue;
+      }
+
+      const level = normalizeRenderedHeadingLevel(heading.level);
+      const id = uniqueHeadingId(heading.title, usedIds);
+      blocks.push({ kind: "heading", id, level, text: heading.title });
+
+      if (level === 2 || level === 3) {
+        outline.push({ id, level, title: heading.title });
+      }
+      continue;
+    }
+
+    blocks.push({ kind: "paragraph", text });
+  }
+
+  return { blocks, outline };
+}
+
+function parseMarkdownHeading(text: string): { level: number; title: string } | null {
+  if (text.includes("\n")) return null;
+  const match = /^(#{1,6})\s+(.+?)\s*#*$/.exec(text);
+  if (!match) return null;
+
+  const marker = match[1] ?? "";
+  const title = stripInlineMarkdown(match[2] ?? "").trim();
+  if (!marker || !title) return null;
+
+  return { level: marker.length, title };
+}
+
+function normalizeRenderedHeadingLevel(level: number): 2 | 3 | 4 | 5 | 6 {
+  if (level <= 2) return 2;
+  if (level === 3) return 3;
+  if (level === 4) return 4;
+  if (level === 5) return 5;
+  return 6;
+}
+
+function uniqueHeadingId(title: string, usedIds: Map<string, number>): string {
+  const baseId = slugifyForAnchor(title) || "section";
+  const count = usedIds.get(baseId) ?? 0;
+  usedIds.set(baseId, count + 1);
+  return count === 0 ? baseId : `${baseId}-${count + 1}`;
+}
+
+function slugifyForAnchor(value: string): string {
+  return stripInlineMarkdown(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeHeadingText(value: string): string {
+  return stripInlineMarkdown(value).trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function stripInlineMarkdown(value: string): string {
+  return value
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2")
+    .replace(/\[\[([^\]]+)\]\]/g, (_, target: string) => displayWikilinkLabel(target))
+    .replace(/\*\*([^*]+)\*\*/g, "$1");
 }
 
 function renderInline(
@@ -723,7 +945,8 @@ function renderInline(
     const strongLabel = match[2];
 
     if (wikiLabel) {
-      const target = pageByTitle.get(wikiLabel.toLowerCase());
+      const wikilink = parseWikilinkLabel(wikiLabel);
+      const target = resolveInlinePageTarget(wikilink, pageByTitle);
       parts.push(
         target ? (
           <button
@@ -732,11 +955,14 @@ function renderInline(
             type="button"
             onClick={() => openPage(target.id)}
           >
-            {wikiLabel}
+            {wikilink.label}
           </button>
         ) : (
-          <span key={`wiki-${key}`} className="wikilink wikilink--missing">
-            {wikiLabel}
+          <span
+            key={`wiki-${key}`}
+            className={`wikilink ${wikilink.entityKind ? "wikilink--entity" : "wikilink--missing"}`}
+          >
+            {wikilink.label}
           </span>
         )
       );
@@ -754,6 +980,39 @@ function renderInline(
   }
 
   return parts;
+}
+
+function parseWikilinkLabel(value: string): {
+  target: string;
+  label: string;
+  entityKind?: string;
+} {
+  const [rawTarget = "", rawLabel] = value.split("|", 2);
+  const target = rawTarget.trim();
+  const entityKind = typedWikilinkKind(target);
+  const label = rawLabel?.trim() || displayWikilinkLabel(target);
+  return { target, label, entityKind };
+}
+
+function displayWikilinkLabel(target: string): string {
+  const typedTarget = /^([A-Za-z][A-Za-z0-9 _-]{1,31}):(.+)$/.exec(target.trim());
+  return typedTarget?.[2]?.trim() || target.trim();
+}
+
+function typedWikilinkKind(target: string): string | undefined {
+  const typedTarget = /^([A-Za-z][A-Za-z0-9 _-]{1,31}):(.+)$/.exec(target.trim());
+  return typedTarget?.[1]?.trim().toLowerCase();
+}
+
+function resolveInlinePageTarget(
+  wikilink: { target: string; label: string; entityKind?: string },
+  pageByTitle: Map<string, WikiPage>
+): WikiPage | undefined {
+  return (
+    pageByTitle.get(wikilink.target.toLowerCase()) ??
+    pageByTitle.get(displayWikilinkLabel(wikilink.target).toLowerCase()) ??
+    pageByTitle.get(wikilink.label.toLowerCase())
+  );
 }
 
 function GraphView({

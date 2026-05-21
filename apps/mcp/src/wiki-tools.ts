@@ -14,6 +14,7 @@ import {
   getWikiIndexConfig,
   indexWikiPages,
   queryWikiRag as runWikiRagQuery,
+  QdrantHttpStore,
   type EmbeddingProvider,
   type QdrantStore,
   type WikiIndexConfig,
@@ -70,6 +71,12 @@ export interface WikiLinkPagesInput {
   toPageId: string;
   agentId: string;
   sourceText?: string | undefined;
+  mode?: "propose" | "direct" | undefined;
+}
+
+export interface WikiDeleteNoteInput {
+  pageId: string;
+  agentId: string;
   mode?: "propose" | "direct" | undefined;
 }
 
@@ -172,6 +179,50 @@ export function appendWikiPage(context: WikiToolContext, input: WikiAppendPageIn
     }
   });
   return { mode: "propose" as const, proposal };
+}
+
+export async function deleteWikiNote(context: WikiToolContext, input: WikiDeleteNoteInput) {
+  const page = getPageByReference(context.repo, input.pageId);
+  const agentId = input.agentId.trim();
+  if (!agentId) throw new Error("agentId is required");
+
+  if ((input.mode ?? "propose") === "direct") {
+    const indexCleanup = await deletePageIndexPoints(context, page.id);
+    const deletedPage = context.repo.deletePage(page.id);
+    context.repo.rebuildDerivedGraph();
+    return { mode: "direct" as const, page: summarizePage(deletedPage), indexCleanup };
+  }
+
+  const proposal = context.repo.createProposal({
+    title: `Delete note: ${page.title}`,
+    proposedByAgentId: agentId,
+    payload: {
+      title: `Delete note: ${page.title}`,
+      proposedByAgentId: agentId,
+      changes: [
+        {
+          op: "delete_note",
+          pageId: page.id
+        }
+      ]
+    }
+  });
+  return { mode: "propose" as const, proposal };
+}
+
+async function deletePageIndexPoints(context: WikiToolContext, pageId: string) {
+  const qdrant = context.qdrant ?? new QdrantHttpStore(getContextIndexConfig(context).qdrant);
+  const health = await qdrant.health();
+  if (!health.online) {
+    return {
+      qdrantDeleted: false,
+      skipped: true,
+      error: health.error ?? "qdrant is offline"
+    };
+  }
+
+  await qdrant.deletePagePoints(pageId);
+  return { qdrantDeleted: true, skipped: false };
 }
 
 export function linkWikiPages(context: WikiToolContext, input: WikiLinkPagesInput) {

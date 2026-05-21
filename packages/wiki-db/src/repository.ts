@@ -455,6 +455,17 @@ export class WikiRepository {
     return this.savePage(nextPage, { ...options, now });
   }
 
+  deletePage(id: string): WikiPage {
+    const page = this.getRequiredPage(id);
+    const remove = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM pages WHERE id = ?").run(page.id);
+      this.deleteUnusedEntities();
+    });
+
+    remove();
+    return page;
+  }
+
   getPage(id: string): WikiPage | null {
     const row = this.db.prepare("SELECT * FROM pages WHERE id = ?").get(id) as PageRow | undefined;
     return row ? rowToPage(row) : null;
@@ -2105,12 +2116,16 @@ function findEntityGraphNodeReference(graph: KnowledgeGraph, reference: string):
   return (
     graph.nodes.find((candidate) => {
       const candidateEntityId = candidate.metadata.entityId;
+      const candidateEntityIds = metadataStringArray(candidate.metadata, "entityIds");
       return (
-        candidate.kind === "entity" &&
-        (candidate.id === decoded ||
-          candidate.id === entityNodeId(value) ||
-          candidateEntityId === value ||
-          normalizeTitle(candidate.title) === normalized)
+        candidate.id === decoded ||
+        candidateEntityId === value ||
+        candidateEntityIds.includes(value) ||
+        candidateEntityIds.includes(stripGraphNodePrefix(value)) ||
+        (candidate.kind === "entity" &&
+          (candidate.id === decoded ||
+            candidate.id === entityNodeId(value) ||
+            normalizeTitle(candidate.title) === normalized))
       );
     }) ?? null
   );
@@ -2367,8 +2382,10 @@ function buildKnowledgeGraph(input: {
   const edges = new Map<string, GraphEdge>();
   const pagesById = new Map(input.pages.map((page) => [page.id, page]));
   const entitiesById = new Map(input.entities.map((entity) => [entity.id, entity]));
+  const pageBackedEntitiesByPageId = groupPageBackedEntities(input.entities, pagesById);
 
   for (const page of input.pages) {
+    const pageBackedEntities = pageBackedEntitiesByPageId.get(page.id) ?? [];
     nodes.set(pageNodeId(page.id), {
       id: pageNodeId(page.id),
       kind: "page",
@@ -2382,7 +2399,9 @@ function buildKnowledgeGraph(input: {
         slug: page.slug,
         status: page.status,
         sourceType: page.sourceType,
-        trust: page.trust
+        trust: page.trust,
+        entityIds: pageBackedEntities.map((entity) => entity.id),
+        entityKinds: pageBackedEntities.map((entity) => entity.kind)
       }
     });
 
@@ -2430,6 +2449,8 @@ function buildKnowledgeGraph(input: {
   }
 
   for (const entity of input.entities) {
+    if (pageBackedEntityNodeId(entity, pagesById)) continue;
+
     nodes.set(entityNodeId(entity.id), {
       id: entityNodeId(entity.id),
       kind: "entity",
@@ -2465,17 +2486,16 @@ function buildKnowledgeGraph(input: {
     const entity = entitiesById.get(mention.entityId);
     if (!page || !entity) continue;
 
-    const represents =
-      metadataPageId(entity.metadata) === mention.pageId && mention.sourceText === page.title;
-    const kind = represents ? "represents" : "mentions";
-    const edgeId = represents
-      ? createGraphEdgeId("represents", mention.pageId, mention.entityId)
-      : createGraphEdgeId(kind, mention.id);
+    const toNodeId = graphNodeIdForEntity(entity, pagesById);
+    if (toNodeId === pageNodeId(mention.pageId)) continue;
+
+    const kind = "mentions";
+    const edgeId = createGraphEdgeId(kind, mention.id);
     edges.set(edgeId, {
       id: edgeId,
       kind,
       fromNodeId: pageNodeId(mention.pageId),
-      toNodeId: entityNodeId(mention.entityId),
+      toNodeId,
       origin: "derived",
       sourcePageId: mention.pageId,
       createdAt: mention.createdAt,
@@ -2486,30 +2506,21 @@ function buildKnowledgeGraph(input: {
     });
   }
 
-  for (const entity of input.entities) {
-    const pageId = metadataPageId(entity.metadata);
-    if (!pageId || !pagesById.has(pageId)) continue;
-    const edgeId = createGraphEdgeId("represents", pageId, entity.id);
-    if (edges.has(edgeId)) continue;
-    edges.set(edgeId, {
-      id: edgeId,
-      kind: "represents",
-      fromNodeId: pageNodeId(pageId),
-      toNodeId: entityNodeId(entity.id),
-      origin: "derived",
-      sourcePageId: pageId,
-      createdAt: entity.createdAt,
-      metadata: { entityId: entity.id }
-    });
-  }
-
   for (const link of input.entityLinks) {
     if (!entitiesById.has(link.fromEntityId) || !entitiesById.has(link.toEntityId)) continue;
+    const fromEntity = entitiesById.get(link.fromEntityId);
+    const toEntity = entitiesById.get(link.toEntityId);
+    if (!fromEntity || !toEntity) continue;
+
+    const fromNodeId = graphNodeIdForEntity(fromEntity, pagesById);
+    const toNodeId = graphNodeIdForEntity(toEntity, pagesById);
+    if (fromNodeId === toNodeId) continue;
+
     edges.set(createGraphEdgeId("entity_link", link.id), {
       id: createGraphEdgeId("entity_link", link.id),
       kind: link.origin === "co-mention" ? "co_mentioned_with" : "related_to",
-      fromNodeId: entityNodeId(link.fromEntityId),
-      toNodeId: entityNodeId(link.toEntityId),
+      fromNodeId,
+      toNodeId,
       origin: link.origin,
       sourcePageId: link.sourcePageId,
       createdAt: link.createdAt,
@@ -2526,6 +2537,36 @@ function buildKnowledgeGraph(input: {
     entityLinks: input.entityLinks,
     mentions: input.mentions
   };
+}
+
+function groupPageBackedEntities(
+  entities: WikiEntity[],
+  pagesById: Map<string, WikiPage>
+): Map<string, WikiEntity[]> {
+  const groups = new Map<string, WikiEntity[]>();
+
+  for (const entity of entities) {
+    const pageId = metadataPageId(entity.metadata);
+    if (!pageId || !pagesById.has(pageId)) continue;
+
+    const group = groups.get(pageId) ?? [];
+    group.push(entity);
+    groups.set(pageId, group);
+  }
+
+  return groups;
+}
+
+function graphNodeIdForEntity(entity: WikiEntity, pagesById: Map<string, WikiPage>): string {
+  return pageBackedEntityNodeId(entity, pagesById) ?? entityNodeId(entity.id);
+}
+
+function pageBackedEntityNodeId(
+  entity: WikiEntity,
+  pagesById: Map<string, WikiPage>
+): string | null {
+  const pageId = metadataPageId(entity.metadata);
+  return pageId && pagesById.has(pageId) ? pageNodeId(pageId) : null;
 }
 
 function traverseGraph(
@@ -2577,6 +2618,13 @@ function filterKnowledgeGraph(
   for (const id of selectedIds) {
     if (id.startsWith("page:")) pageIds.add(id.slice("page:".length));
     if (id.startsWith("entity:")) entityIds.add(id.slice("entity:".length));
+  }
+
+  for (const entity of graph.entities) {
+    const pageId = metadataPageId(entity.metadata);
+    if (pageId && pageIds.has(pageId)) {
+      entityIds.add(entity.id);
+    }
   }
 
   return {
@@ -2670,6 +2718,12 @@ function metadataString(metadata: Record<string, unknown>, key: string): string 
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function metadataStringArray(metadata: Record<string, unknown>, key: string): string[] {
+  const value = metadata[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 function getDuplicateGroup(

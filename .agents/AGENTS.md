@@ -109,7 +109,7 @@ Current MCP resources:
 
 Expose the wiki through MCP using:
 
-- Current tools for search, page reads, graph query, RAG query, add note, append page, link pages, runtime info, and index rebuild.
+- Current tools for search, page reads, graph query, RAG query, add note, delete note, append page, link pages, runtime info, and index rebuild.
 - Remaining this-phase resources for backlinks, graph neighborhoods, proposals, captures, and agent notes.
 - Remaining this-phase prompts for memory sourcing, session summaries, source ingestion, and graph audits.
 
@@ -188,6 +188,7 @@ Implemented MCP tools:
 - `wiki_rag_query`
 - `wiki_rebuild_index`
 - `wiki_add_note`
+- `wiki_delete_note`
 - `wiki_append_page`
 - `wiki_link_pages`
 - `wiki_runtime`

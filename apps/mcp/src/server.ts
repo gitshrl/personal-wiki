@@ -14,6 +14,7 @@ import {
 import {
   addWikiNote,
   appendWikiPage,
+  deleteWikiNote,
   getPageByReference,
   getWikiPage,
   linkWikiPages,
@@ -209,6 +210,20 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
       }
     },
     async (input) => jsonToolResult(addWikiNote(context, input))
+  );
+
+  server.registerTool(
+    "wiki_delete_note",
+    {
+      title: "Delete Wiki Note",
+      description: "Delete a note/page from the personal wiki. Defaults to proposal mode.",
+      inputSchema: {
+        pageId: z.string().min(1),
+        agentId: z.string().min(1),
+        mode: z.enum(["propose", "direct"]).optional()
+      }
+    },
+    async (input) => jsonToolResult(await deleteWikiNote(context, input))
   );
 
   server.registerTool(

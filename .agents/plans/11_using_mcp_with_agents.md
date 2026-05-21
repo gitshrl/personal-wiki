@@ -149,6 +149,7 @@ wiki_graph_query
 wiki_rag_query
 wiki_rebuild_index
 wiki_add_note
+wiki_delete_note
 wiki_append_page
 wiki_link_pages
 wiki_runtime
@@ -263,6 +264,16 @@ Link pages directly:
 }
 ```
 
+Delete an accidental note/page directly:
+
+```json
+{
+  "pageId": "plan-model-eval-01-benchmark-plan",
+  "agentId": "claude",
+  "mode": "direct"
+}
+```
+
 ## Agent Instructions
 
 Tell agents this:
@@ -273,6 +284,7 @@ Search before answering project-history questions.
 Read matching pages as Markdown.
 Use wiki_rag_query when you need compiled context.
 When new durable knowledge appears, call wiki_add_note.
+When you accidentally create the wrong note/page, call wiki_delete_note.
 Use mode=propose by default.
 Use mode=direct only when i explicitly ask you to write.
 Prefer short notes with [[wikilinks]] over full conversation transcripts.

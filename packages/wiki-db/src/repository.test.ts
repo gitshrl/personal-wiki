@@ -203,6 +203,88 @@ describe("WikiRepository", () => {
     });
   });
 
+  it("collapses page-backed entities into their page node in the knowledge graph", () => {
+    withRepository(({ repo }) => {
+      const page = repo.createPage(
+        {
+          kind: "design",
+          title: "Personal Wiki System Design",
+          body: "Keep [[protocol:MCP]] connected.",
+          metadata: { entityKind: "project" }
+        },
+        { now }
+      );
+
+      const graph = repo.getKnowledgeGraph();
+      const pageBackedEntity = graph.entities.find(
+        (entity) => entity.title === "Personal Wiki System Design"
+      );
+
+      expect(pageBackedEntity).toBeDefined();
+      expect(graph.nodes.filter((node) => node.title === "Personal Wiki System Design")).toEqual([
+        expect.objectContaining({
+          id: `page:${page.id}`,
+          kind: "page",
+          metadata: expect.objectContaining({
+            entityIds: [pageBackedEntity?.id],
+            entityKinds: ["project"]
+          })
+        })
+      ]);
+      expect(graph.nodes).toEqual(
+        expect.not.arrayContaining([
+          expect.objectContaining({
+            id: `entity:${pageBackedEntity?.id}`,
+            kind: "entity"
+          })
+        ])
+      );
+      expect(graph.edges).toEqual(
+        expect.not.arrayContaining([
+          expect.objectContaining({
+            fromNodeId: `page:${page.id}`,
+            toNodeId: `page:${page.id}`
+          })
+        ])
+      );
+      expect(
+        resolveGraphFocusNode(repo, graph, { focusEntityId: pageBackedEntity?.id })
+      ).toMatchObject({
+        id: `page:${page.id}`,
+        kind: "page"
+      });
+    });
+  });
+
+  it("deletes pages and cascades local graph records", () => {
+    withRepository(({ repo }) => {
+      const target = repo.createPage({ kind: "topic", title: "Target" }, { now });
+      const note = repo.createPage(
+        {
+          kind: "note",
+          title: "Temporary note",
+          body: "Delete this but keep [[Target]]."
+        },
+        { now }
+      );
+
+      expect(repo.listLinks({ fromPageId: note.id })).toHaveLength(1);
+      expect(repo.getEntityGraph().mentions.map((mention) => mention.pageId)).toContain(note.id);
+
+      const deleted = repo.deletePage(note.id);
+
+      expect(deleted.id).toBe(note.id);
+      expect(repo.getPage(note.id)).toBeNull();
+      expect(repo.listLinks({ fromPageId: note.id })).toHaveLength(0);
+      expect(repo.listPageRevisions(note.id)).toHaveLength(0);
+      expect(repo.listIndexJobs({ pageId: note.id })).toHaveLength(0);
+      expect(repo.getEntityGraph().mentions.map((mention) => mention.pageId)).not.toContain(
+        note.id
+      );
+      expect(repo.getPage(target.id)).toBeDefined();
+    });
+  });
+
   it("reads backlinks, outgoing pages, neighborhoods, paths, and missing links", () => {
     withRepository(({ repo }) => {
       const mcp = repo.createPage({ kind: "topic", title: "MCP" }, { now });

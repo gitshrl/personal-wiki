@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWikiRepository, openWikiDatabase } from "@personal-wiki/wiki-db";
 import {
   addWikiNote,
+  deleteWikiNote,
   getWikiPage,
   queryWikiGraph,
   queryWikiRag,
@@ -102,6 +103,44 @@ describe("wiki MCP tool actions", () => {
         id: "research-note-agent-note",
         kind: "research-note"
       });
+    } finally {
+      close();
+    }
+  });
+
+  it("supports proposed and direct note deletion", async () => {
+    const { context, close } = createContext();
+
+    try {
+      const page = context.repo.createPage({
+        kind: "note",
+        title: "Temporary note",
+        body: "Delete later."
+      });
+
+      const proposal = await deleteWikiNote(context, {
+        pageId: page.id,
+        agentId: "codex"
+      });
+
+      expect(proposal).toMatchObject({
+        mode: "propose",
+        proposal: expect.objectContaining({ status: "pending" })
+      });
+      expect(context.repo.getPage(page.id)).toBeDefined();
+
+      const deleted = await deleteWikiNote(context, {
+        pageId: page.id,
+        agentId: "codex",
+        mode: "direct"
+      });
+
+      expect(deleted).toMatchObject({
+        mode: "direct",
+        page: expect.objectContaining({ id: page.id }),
+        indexCleanup: { qdrantDeleted: true, skipped: false }
+      });
+      expect(context.repo.getPage(page.id)).toBeNull();
     } finally {
       close();
     }
