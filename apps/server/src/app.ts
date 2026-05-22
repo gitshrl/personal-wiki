@@ -85,8 +85,6 @@ const noteSchema = z.object({
   kind: pageKindSchema.optional(),
   summary: z.string().trim().max(96).optional(),
   agentId: z.string().trim().min(1),
-  sourceSessionId: z.string().optional(),
-  sourceSessionLabel: z.string().trim().optional(),
   targetPages: z.array(z.string().trim().min(1)).optional(),
   tags: z.array(z.string().trim().min(1)).optional(),
   mode: writeModeSchema.optional()

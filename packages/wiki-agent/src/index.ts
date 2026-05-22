@@ -8,8 +8,6 @@ export interface AddNoteInput {
   kind?: PageKind | undefined;
   summary?: string | undefined;
   agentId: string;
-  sourceSessionId?: string | undefined;
-  sourceSessionLabel?: string | undefined;
   targetPages?: string[] | undefined;
   tags?: string[] | undefined;
   mode?: WriteMode | undefined;
@@ -28,8 +26,6 @@ export interface ProposalChange {
 export interface WikiProposalPayload {
   title: string;
   proposedByAgentId: string;
-  sourceSessionId?: string | undefined;
-  sourceSessionLabel?: string | undefined;
   changes: ProposalChange[];
 }
 
@@ -39,8 +35,6 @@ interface NormalizedAddNoteInput {
   kind: PageKind;
   summary?: string | undefined;
   agentId: string;
-  sourceSessionId?: string | undefined;
-  sourceSessionLabel?: string | undefined;
   targetPages: string[];
   tags: string[];
   mode: WriteMode;
@@ -51,8 +45,6 @@ export function buildAddNoteProposal(input: AddNoteInput): WikiProposalPayload {
   return {
     title: normalized.title,
     proposedByAgentId: normalized.agentId,
-    sourceSessionId: normalized.sourceSessionId,
-    sourceSessionLabel: normalized.sourceSessionLabel,
     changes: [
       {
         op: "create_page",
@@ -87,8 +79,6 @@ export function normalizeAddNoteInput(input: AddNoteInput): NormalizedAddNoteInp
   const body = input.body.trim();
   const summary = input.summary?.trim();
   const agentId = input.agentId.trim();
-  const sourceSessionId = input.sourceSessionId?.trim();
-  const sourceSessionLabel = input.sourceSessionLabel?.trim();
   if (!title) throw new Error("title is required");
   if (!body) throw new Error("body is required");
   if (summary && summary.length > 96) throw new Error("summary must be 96 characters or fewer");
@@ -100,8 +90,6 @@ export function normalizeAddNoteInput(input: AddNoteInput): NormalizedAddNoteInp
     kind: normalizePageKind(input.kind ?? "note"),
     summary: summary || undefined,
     agentId,
-    sourceSessionId: sourceSessionId || undefined,
-    sourceSessionLabel: sourceSessionLabel || undefined,
     targetPages: input.targetPages?.map((targetPage) => targetPage.trim()).filter(Boolean) ?? [],
     tags: input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [],
     mode: input.mode ?? "propose"
@@ -110,8 +98,6 @@ export function normalizeAddNoteInput(input: AddNoteInput): NormalizedAddNoteInp
 
 function noteMetadata(input: NormalizedAddNoteInput): Record<string, unknown> {
   return {
-    ...(input.sourceSessionId ? { sourceSessionId: input.sourceSessionId } : {}),
-    ...(input.sourceSessionLabel ? { sourceSessionLabel: input.sourceSessionLabel } : {}),
     ...(input.targetPages.length > 0 ? { targetPages: input.targetPages } : {}),
     ...(input.tags.length > 0 ? { tags: input.tags } : {})
   };

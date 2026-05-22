@@ -132,7 +132,6 @@ describe("server app", () => {
           body: "Connect this note to a topic.",
           summary: "Short direct note.",
           agentId: "codex",
-          sourceSessionLabel: "local test session",
           targetPages: ["Personal wiki"],
           mode: "direct"
         })
@@ -146,7 +145,6 @@ describe("server app", () => {
       };
       expect(json.mode).toBe("direct");
       expect(json.page.summary).toBe("Short direct note.");
-      expect(json.page.metadata.sourceSessionLabel).toBe("local test session");
       expect(json.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
       const graph = await app.request(`/api/graph?focus=${json.page.id}`);

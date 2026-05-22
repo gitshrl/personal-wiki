@@ -36,15 +36,14 @@ describe("wiki-agent", () => {
     });
   });
 
-  it("stores source session metadata only when it is meaningful", () => {
+  it("stores summary and useful metadata", () => {
     const page = noteInputToPage(
       {
         title: "Session note",
         body: "MCP writes durable notes.",
         summary: "Short durable subtitle.",
         agentId: "agent-codex",
-        sourceSessionId: " session-2026-05-22 ",
-        sourceSessionLabel: " 2026 planning session ",
+        targetPages: [" Personal wiki "],
         tags: [" mcp "]
       },
       "2026-05-20T00:00:00.000Z"
@@ -52,8 +51,7 @@ describe("wiki-agent", () => {
 
     expect(page.summary).toBe("Short durable subtitle.");
     expect(page.metadata).toEqual({
-      sourceSessionId: "session-2026-05-22",
-      sourceSessionLabel: "2026 planning session",
+      targetPages: ["Personal wiki"],
       tags: ["mcp"]
     });
   });

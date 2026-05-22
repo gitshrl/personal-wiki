@@ -103,8 +103,7 @@ Every agent-written page should satisfy this checklist:
 
 - `kind` is `note` unless the page has a truly different lifecycle.
 - `summary` is present, one sentence, 96 characters or fewer, and does not repeat the title.
-- Source/session context lives in metadata, not in the body.
-- Use `sourceSessionId` for a real stable id; use `sourceSessionLabel` for a human-readable session label.
+- Source context lives in metadata or tags, not in boilerplate body lines.
 - The body starts with the page title, then useful sections. Do not add boilerplate source lines.
 - No `Related`, `See also`, or link-dump section.
 - At most five meaningful wikilinks/entity mentions per page, inline where the idea is discussed.
@@ -155,8 +154,6 @@ Why this exists. Mention project, repo, source session, or date when useful.
 Every write should include:
 
 - `agentId`
-- `sourceSessionId` when available; omit it when unknown instead of writing an empty string
-- `sourceSessionLabel` when there is useful human session/source context but no stable session id
 - `targetPages` when linking to known existing pages
 - `tags` when useful for retrieval
 - `mode: "propose"` by default

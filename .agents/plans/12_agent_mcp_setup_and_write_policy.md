@@ -195,8 +195,7 @@ Every agent-written page should satisfy this contract:
 
 - `kind` is `note` unless the page has a truly different lifecycle.
 - `summary` is present, one sentence, 96 characters or fewer, and does not repeat the title.
-- Source/session context lives in metadata, not in the body.
-- Use `sourceSessionId` for a real stable id; use `sourceSessionLabel` for a human-readable session label.
+- Source context lives in metadata or tags, not in boilerplate body lines.
 - The body starts with the page title, then useful sections. Do not add boilerplate source lines.
 - No `Related`, `See also`, or link-dump section.
 - At most five meaningful wikilinks/entity mentions per page, inline where the idea is discussed.
@@ -251,8 +250,6 @@ Do not force every section. Use only the sections needed.
 Every write should include:
 
 - `agentId`
-- `sourceSessionId` when available; omit it when unknown instead of writing an empty string
-- `sourceSessionLabel` when there is useful human session/source context but no stable session id
 - `targetPages` when linking to known existing pages
 - `tags` when they help retrieval
 - `mode: "propose"` by default
@@ -265,7 +262,6 @@ Example:
   "body": "Decision: agents using [[Personal wiki]] should default to proposal mode and require approval before creating new entity pages.",
   "kind": "note",
   "agentId": "codex",
-  "sourceSessionId": "session-2026-05-22-personal-wiki-mcp-policy",
   "targetPages": ["Personal wiki", "MCP"],
   "tags": ["agent-workflow", "mcp", "write-policy"],
   "mode": "propose"

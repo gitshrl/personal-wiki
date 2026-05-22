@@ -126,7 +126,6 @@ type OutlineItem = {
 const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "/wiki-api";
 const pageSubtitleMaxLength = 96;
 const pageLedeMaxLength = 180;
-const metadataValueMaxLength = 36;
 
 export default function Home() {
   const [pages, setPages] = useState<WikiPage[]>([]);
@@ -770,18 +769,8 @@ function EntityPage({
 
 function MetadataRow({ page, linkCount }: { page: WikiPage; linkCount: number }) {
   const items: Array<{ key: string; value: string; title?: string | undefined }> = [];
-  const sourceSession =
-    metadataText(page.metadata, "sourceSessionLabel") ??
-    metadataText(page.metadata, "sourceSessionId");
 
   if (page.createdByAgentId) items.push({ key: "agent", value: page.createdByAgentId });
-  if (sourceSession) {
-    items.push({
-      key: "session",
-      value: truncateMiddle(sourceSession, metadataValueMaxLength),
-      title: sourceSession
-    });
-  }
   items.push({ key: "updated", value: formatDate(page.updatedAt) });
   if (linkCount > 0) items.push({ key: "links", value: String(linkCount) });
 
@@ -1843,13 +1832,6 @@ function metadataUrl(node: GraphNode): string | undefined {
   return typeof url === "string" ? url : undefined;
 }
 
-function metadataText(metadata: Record<string, unknown>, key: string): string | undefined {
-  const value = metadata[key];
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
 function getEntityForNode(
   node: GraphNode,
   entityById: Map<string, WikiEntity>
@@ -1922,16 +1904,6 @@ function truncateText(value: string, maxLength: number): string {
   if (normalized.length <= maxLength) return normalized;
   if (maxLength <= 3) return normalized.slice(0, maxLength);
   return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
-}
-
-function truncateMiddle(value: string, maxLength: number): string {
-  const normalized = value.trim().replace(/\s+/g, " ");
-  if (normalized.length <= maxLength) return normalized;
-  if (maxLength <= 3) return normalized.slice(0, maxLength);
-
-  const startLength = Math.ceil((maxLength - 3) * 0.65);
-  const endLength = maxLength - 3 - startLength;
-  return `${normalized.slice(0, startLength)}...${normalized.slice(-endLength)}`;
 }
 
 function formatDate(value: string): string {
