@@ -63,7 +63,9 @@ export function shortHash(value: string): string {
 }
 
 export function normalizePageKind(value: string): string {
-  return slugify(value) || "page";
+  const kind = slugify(value) || "page";
+  if (kind === "article" || kind === "design" || kind === "plan") return "note";
+  return kind;
 }
 
 export function normalizeEntityKind(value: string | undefined): string {

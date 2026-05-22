@@ -184,10 +184,10 @@ entity_links
 
 ## Notes
 
-- `pages.kind` is a normalized, user/domain-defined slug.
+- `pages.kind` is a normalized, coarse slug. Authored wiki pages use `note`; plan/design/article are title, tag, heading, or metadata distinctions.
 - `entities.kind` is also a normalized, user/domain-defined slug.
 - Do not enforce a fixed kind enum in SQLite.
-- New domains can add page or entity kinds such as `trade`, `paper`, `company`, `person`, `protocol`, or `project` without migrations.
+- New domains can add page kinds only when the domain needs a different lifecycle. Entity kinds can grow more freely.
 - `links.origin` starts with `wikilink`, `manual`, `proposal`, or `system`.
 - The graph API is a derived heterogeneous view, not a separate source of truth.
 - Graph node kinds are stable: `page`, `entity`, `agent`, and `resource`.

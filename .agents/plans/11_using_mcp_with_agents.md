@@ -257,7 +257,7 @@ Link pages directly:
 
 ```json
 {
-  "fromPageId": "article-session-summary-wiki-api-wiring",
+  "fromPageId": "note-session-summary-wiki-api-wiring",
   "toPageId": "topic-personal-wiki",
   "agentId": "codex",
   "mode": "direct"
@@ -268,7 +268,7 @@ Delete an accidental note/page directly:
 
 ```json
 {
-  "pageId": "plan-model-eval-01-benchmark-plan",
+  "pageId": "note-model-eval-01-benchmark-plan",
   "agentId": "claude",
   "mode": "direct"
 }

@@ -9,7 +9,7 @@ describe("graph", () => {
   const mcp = createPage({ kind: "topic", title: "MCP" }, now);
   const wiki = createPage({ kind: "topic", title: "Personal wiki" }, now);
   const memory = createPage({ kind: "topic", title: "Agent memory" }, now);
-  const note = createPage({ kind: "article", title: "Note" }, now);
+  const note = createPage({ kind: "note", title: "Note" }, now);
   const links: WikiLink[] = [
     link(note.id, mcp.id),
     link(mcp.id, wiki.id),
@@ -23,6 +23,21 @@ describe("graph", () => {
     expect(researchNote).toMatchObject({
       id: "research-note-planning-note",
       kind: "research-note"
+    });
+  });
+
+  it("normalizes authored page kind aliases to note", () => {
+    expect(createPage({ kind: "plan", title: "Roadmap" }, now)).toMatchObject({
+      id: "note-roadmap",
+      kind: "note"
+    });
+    expect(createPage({ kind: "design", title: "System shape" }, now)).toMatchObject({
+      id: "note-system-shape",
+      kind: "note"
+    });
+    expect(createPage({ kind: "article", title: "Write-up" }, now)).toMatchObject({
+      id: "note-write-up",
+      kind: "note"
     });
   });
 

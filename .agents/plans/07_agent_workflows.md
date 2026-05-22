@@ -74,19 +74,19 @@ Avoid giant transcript dumps.
 
 ## Source Ingest
 
-Do not ingest everything into one article.
+Do not ingest everything into one note.
 
 Preferred output:
 
 - One source page.
 - Updates to existing pages.
-- New page kinds only when the domain needs them.
+- Use `note` for authored wiki pages. New page kinds only when the domain needs a different lifecycle.
 - Links to relevant people, agents, organizations, projects, or user-defined kinds.
 - One proposal that groups all changes.
 
 Ingest prompt should ask the agent to:
 
-- Keep the source article short.
+- Keep the source note short.
 - Extract durable claims only.
 - Add wikilinks.
 - Avoid near-duplicate topics.

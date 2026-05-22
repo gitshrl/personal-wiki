@@ -1,5 +1,7 @@
 "use client";
 
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import type Cytoscape from "cytoscape";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -94,7 +96,11 @@ type KnowledgeGraph = {
   mentions: EntityMention[];
 };
 
-type ViewState = { mode: "home" } | { mode: "graph" } | { mode: "entry"; id: string };
+type ViewState =
+  | { mode: "home" }
+  | { mode: "graph" }
+  | { mode: "entry"; id: string }
+  | { mode: "entity"; nodeId: string };
 
 type SearchItem = {
   id: string;
@@ -114,23 +120,6 @@ type OutlineItem = {
   title: string;
 };
 
-type ProseBlock =
-  | {
-      kind: "heading";
-      id: string;
-      level: 2 | 3 | 4 | 5 | 6;
-      text: string;
-    }
-  | {
-      kind: "paragraph";
-      text: string;
-    };
-
-type ParsedPageBody = {
-  blocks: ProseBlock[];
-  outline: OutlineItem[];
-};
-
 const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "/wiki-api";
 
 export default function Home() {
@@ -138,6 +127,8 @@ export default function Home() {
   const [pageLinks, setPageLinks] = useState<WikiLink[]>([]);
   const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
+  const [graphEntities, setGraphEntities] = useState<WikiEntity[]>([]);
+  const [graphMentions, setGraphMentions] = useState<EntityMention[]>([]);
   const [view, setView] = useState<ViewState>({ mode: "home" });
   const [graphFocusId, setGraphFocusId] = useState("");
   const [sidebarFilter, setSidebarFilter] = useState("");
@@ -154,8 +145,16 @@ export default function Home() {
     [pages]
   );
   const nodeById = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
+  const entityById = useMemo(
+    () => new Map(graphEntities.map((entity) => [entity.id, entity])),
+    [graphEntities]
+  );
   const connectionStatus = loading ? "" : error ? "offline" : "online";
   const activePage = view.mode === "entry" ? pageById.get(view.id) : undefined;
+  const activeEntityNode = view.mode === "entity" ? nodeById.get(view.nodeId) : undefined;
+  const activeEntity = activeEntityNode
+    ? getEntityForNode(activeEntityNode, entityById)
+    : undefined;
   const visibleSearchItems = useMemo(
     () => filterSearchItems(pages, search, graphEdges.length),
     [pages, search, graphEdges.length]
@@ -188,11 +187,15 @@ export default function Home() {
       const nextNodes = graphPayload.nodes ?? [];
       const nextEdges = graphPayload.edges ?? [];
       const nextPageLinks = graphPayload.pageLinks ?? [];
+      const nextEntities = graphPayload.entities ?? [];
+      const nextMentions = graphPayload.mentions ?? [];
 
       setPages(nextPages);
       setGraphNodes(nextNodes);
       setGraphEdges(nextEdges);
       setPageLinks(nextPageLinks);
+      setGraphEntities(nextEntities);
+      setGraphMentions(nextMentions);
       setGraphFocusId((current) => {
         if (current && nextNodes.some((node) => node.id === current)) return current;
         return nextNodes[0]?.id ?? "";
@@ -238,6 +241,12 @@ export default function Home() {
     const page = pageByTitle.get(node.title.toLowerCase());
     if (page) {
       openPage(page.id);
+      return;
+    }
+
+    if (node.kind === "entity") {
+      setView({ mode: "entity", nodeId: id });
+      closeSearch();
       return;
     }
 
@@ -294,6 +303,7 @@ export default function Home() {
   const breadcrumb = getBreadcrumb({
     view,
     activePage,
+    activeEntityNode,
     graphNodes,
     graphFocusId,
     nodeById,
@@ -469,6 +479,17 @@ export default function Home() {
               openGraph={openGraph}
             />
           ) : null}
+
+          {view.mode === "entity" && activeEntityNode ? (
+            <EntityDetailView
+              node={activeEntityNode}
+              entity={activeEntity}
+              pages={pages}
+              mentions={graphMentions}
+              openPage={openPage}
+              openGraph={openGraph}
+            />
+          ) : null}
         </main>
       </div>
 
@@ -616,20 +637,18 @@ function EntityPage({
   const linkCount = links.filter(
     (link) => link.fromPageId === page.id || link.toPageId === page.id
   ).length;
-  const parsedBody = useMemo(() => parsePageBody(page.body, page.title), [page.body, page.title]);
-  const showOutline = parsedBody.outline.length >= 2;
-  const [activeOutlineId, setActiveOutlineId] = useState(parsedBody.outline[0]?.id ?? "");
+  const outline = useMemo(() => parsePageOutline(page.body, page.title), [page.body, page.title]);
+  const showOutline = outline.length >= 2;
+  const [activeOutlineId, setActiveOutlineId] = useState(outline[0]?.id ?? "");
 
   useEffect(() => {
-    if (parsedBody.outline.length === 0) {
+    if (outline.length === 0) {
       setActiveOutlineId("");
       return;
     }
 
     setActiveOutlineId((current) =>
-      parsedBody.outline.some((item) => item.id === current)
-        ? current
-        : (parsedBody.outline[0]?.id ?? "")
+      outline.some((item) => item.id === current) ? current : (outline[0]?.id ?? "")
     );
 
     const main = document.querySelector<HTMLElement>(".main");
@@ -647,13 +666,13 @@ function EntityPage({
       { root, rootMargin: "-18% 0px -68% 0px", threshold: [0, 1] }
     );
 
-    for (const item of parsedBody.outline) {
+    for (const item of outline) {
       const element = document.getElementById(item.id);
       if (element) observer.observe(element);
     }
 
     return () => observer.disconnect();
-  }, [page.id, parsedBody.outline]);
+  }, [page.id, outline]);
 
   return (
     <article className={`entity-page ${showOutline ? "entity-page--with-outline" : ""}`}>
@@ -689,7 +708,7 @@ function EntityPage({
 
         {showOutline ? (
           <PageOutline
-            items={parsedBody.outline}
+            items={outline}
             activeId={activeOutlineId}
             setActiveId={setActiveOutlineId}
           />
@@ -697,7 +716,12 @@ function EntityPage({
 
         {page.body ? (
           <section className="entity-section entity-section--prose">
-            <WikiProse blocks={parsedBody.blocks} pageByTitle={pageByTitle} openPage={openPage} />
+            <WikiProse
+              body={page.body}
+              pageTitle={page.title}
+              pageByTitle={pageByTitle}
+              openPage={openPage}
+            />
           </section>
         ) : (
           <section className="entity-section">
@@ -733,7 +757,7 @@ function EntityPage({
 
       {showOutline ? (
         <PageOutline
-          items={parsedBody.outline}
+          items={outline}
           activeId={activeOutlineId}
           setActiveId={setActiveOutlineId}
           variant="rail"
@@ -763,42 +787,166 @@ function MetadataRow({ page, linkCount }: { page: WikiPage; linkCount: number })
   );
 }
 
-function WikiProse({
-  blocks,
-  pageByTitle,
-  openPage
+function EntityDetailView({
+  node,
+  entity,
+  pages,
+  mentions,
+  openPage,
+  openGraph
 }: {
-  blocks: ProseBlock[];
-  pageByTitle: Map<string, WikiPage>;
+  node: GraphNode;
+  entity: WikiEntity | undefined;
+  pages: WikiPage[];
+  mentions: EntityMention[];
   openPage: (id: string) => void;
+  openGraph: (focusId?: string) => void;
 }) {
+  const relatedPages = useMemo(
+    () => getPagesForEntity(entity?.id, pages, mentions),
+    [entity?.id, mentions, pages]
+  );
+
   return (
-    <div className="prose">
-      {blocks.map((block, index) =>
-        block.kind === "heading" ? (
-          <ProseHeading key={block.id} block={block} />
-        ) : (
-          <p key={`${block.text.slice(0, 24)}-${index}`}>
-            {renderInline(block.text, pageByTitle, openPage)}
-          </p>
-        )
-      )}
-    </div>
+    <article className="entity-page">
+      <div className="entity-page__content">
+        <header className="entity-page__header">
+          <div className="entity-page__topline">
+            <div className="entity-page__kind">
+              <KindDot kind={node.subtype ?? node.kind} />
+              <span>{node.subtype ?? node.kind}</span>
+            </div>
+            <button
+              className="entity-page__graph-action"
+              type="button"
+              onClick={() => openGraph(node.id)}
+              title="Open this entity in the graph"
+              aria-label={`View ${node.title} in the graph`}
+            >
+              ✺
+            </button>
+          </div>
+          <h1>{node.title}</h1>
+          {node.summary ? <p className="entity-page__lede">{node.summary}</p> : null}
+          <dl className="metadata">
+            <div>
+              <dt>pages</dt>
+              <dd>{relatedPages.length}</dd>
+            </div>
+          </dl>
+        </header>
+
+        <section className="entity-section">
+          <div className="section-title">
+            <h2>pages</h2>
+            <span>{relatedPages.length}</span>
+          </div>
+          {relatedPages.length > 0 ? (
+            <div className="card-list">
+              {relatedPages.map((page) => (
+                <button
+                  key={page.id}
+                  className="card-row"
+                  type="button"
+                  onClick={() => openPage(page.id)}
+                >
+                  <span>
+                    <strong>{page.title}</strong>
+                    <small>{page.summary ?? page.kind}</small>
+                  </span>
+                  <span>{formatDate(page.updatedAt)}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-copy">No pages mention this entity yet.</p>
+          )}
+        </section>
+      </div>
+    </article>
   );
 }
 
-function ProseHeading({ block }: { block: Extract<ProseBlock, { kind: "heading" }> }) {
-  const content = (
-    <a href={`#${block.id}`} aria-label={`Link to ${block.text}`}>
-      {block.text}
-    </a>
+function WikiProse({
+  body,
+  pageTitle,
+  pageByTitle,
+  openPage
+}: {
+  body: string;
+  pageTitle: string;
+  pageByTitle: Map<string, WikiPage>;
+  openPage: (id: string) => void;
+}) {
+  const markdown = useMemo(() => convertWikilinksToMarkdownLinks(body), [body]);
+  const components = useMemo<Components>(
+    () => ({
+      a({ href, children }) {
+        const wikiValue = href?.startsWith("wiki:") ? safeDecodeUriComponent(href.slice(5)) : null;
+
+        if (wikiValue !== null) {
+          const wikilink = parseWikilinkLabel(wikiValue);
+          const target = resolveInlinePageTarget(wikilink, pageByTitle);
+
+          return target ? (
+            <button className="wikilink" type="button" onClick={() => openPage(target.id)}>
+              {wikilink.label}
+            </button>
+          ) : (
+            <span
+              className={`wikilink ${wikilink.entityKind ? "wikilink--entity" : "wikilink--missing"}`}
+            >
+              {wikilink.label}
+            </span>
+          );
+        }
+
+        return (
+          <a href={href} target={isExternalHref(href) ? "_blank" : undefined} rel="noreferrer">
+            {children}
+          </a>
+        );
+      },
+      h1({ children }) {
+        const text = childrenToText(children);
+        if (normalizeHeadingText(text) === normalizeHeadingText(pageTitle)) return null;
+        return <h2 id={slugifyForAnchor(text)}>{headingLink(text)}</h2>;
+      },
+      h2({ children }) {
+        const text = childrenToText(children);
+        return <h2 id={slugifyForAnchor(text)}>{headingLink(text)}</h2>;
+      },
+      h3({ children }) {
+        const text = childrenToText(children);
+        return <h3 id={slugifyForAnchor(text)}>{headingLink(text)}</h3>;
+      },
+      h4({ children }) {
+        const text = childrenToText(children);
+        return <h4 id={slugifyForAnchor(text)}>{headingLink(text)}</h4>;
+      },
+      h5({ children }) {
+        const text = childrenToText(children);
+        return <h5 id={slugifyForAnchor(text)}>{headingLink(text)}</h5>;
+      },
+      h6({ children }) {
+        const text = childrenToText(children);
+        return <h6 id={slugifyForAnchor(text)}>{headingLink(text)}</h6>;
+      }
+    }),
+    [openPage, pageByTitle, pageTitle]
   );
 
-  if (block.level === 2) return <h2 id={block.id}>{content}</h2>;
-  if (block.level === 3) return <h3 id={block.id}>{content}</h3>;
-  if (block.level === 4) return <h4 id={block.id}>{content}</h4>;
-  if (block.level === 5) return <h5 id={block.id}>{content}</h5>;
-  return <h6 id={block.id}>{content}</h6>;
+  return (
+    <div className="prose">
+      <ReactMarkdown
+        components={components}
+        remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => (url.startsWith("wiki:") ? url : defaultUrlTransform(url))}
+      >
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function PageOutline({
@@ -845,16 +993,23 @@ function PageOutline({
   );
 }
 
-function parsePageBody(body: string, pageTitle: string): ParsedPageBody {
-  const blocks: ProseBlock[] = [];
+function parsePageOutline(body: string, pageTitle: string): OutlineItem[] {
   const outline: OutlineItem[] = [];
   const usedIds = new Map<string, number>();
+  const lines = body.replace(/\r\n?/g, "\n").split("\n");
+  let inCodeFence = false;
 
-  for (const rawBlock of body.split(/\n\n+/)) {
-    const text = rawBlock.trim();
-    if (!text) continue;
+  for (const rawLine of lines) {
+    const trimmedLine = rawLine.trim();
 
-    const heading = parseMarkdownHeading(text);
+    if (/^```/.test(trimmedLine)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+
+    if (inCodeFence) continue;
+
+    const heading = parseMarkdownHeading(trimmedLine);
     if (heading) {
       if (
         heading.level === 1 &&
@@ -865,18 +1020,14 @@ function parsePageBody(body: string, pageTitle: string): ParsedPageBody {
 
       const level = normalizeRenderedHeadingLevel(heading.level);
       const id = uniqueHeadingId(heading.title, usedIds);
-      blocks.push({ kind: "heading", id, level, text: heading.title });
 
       if (level === 2 || level === 3) {
         outline.push({ id, level, title: heading.title });
       }
-      continue;
     }
-
-    blocks.push({ kind: "paragraph", text });
   }
 
-  return { blocks, outline };
+  return outline;
 }
 
 function parseMarkdownHeading(text: string): { level: number; title: string } | null {
@@ -925,61 +1076,83 @@ function stripInlineMarkdown(value: string): string {
     .replace(/\*\*([^*]+)\*\*/g, "$1");
 }
 
-function renderInline(
-  text: string,
-  pageByTitle: Map<string, WikiPage>,
-  openPage: (id: string) => void
-) {
-  const parts: ReactNode[] = [];
-  const pattern = /\[\[([^\]]+)\]\]|\*\*([^*]+)\*\*/g;
-  let lastIndex = 0;
-  let key = 0;
-  let match: RegExpExecArray | null;
+function headingLink(text: string) {
+  const id = slugifyForAnchor(text);
+  return (
+    <a href={`#${id}`} aria-label={`Link to ${text}`}>
+      {text}
+    </a>
+  );
+}
 
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+function childrenToText(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map((child) => childrenToText(child)).join("");
+  return "";
+}
+
+function convertWikilinksToMarkdownLinks(markdown: string): string {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  let inCodeFence = false;
+
+  return lines
+    .map((line) => {
+      if (/^```/.test(line.trim())) {
+        inCodeFence = !inCodeFence;
+        return line;
+      }
+
+      return inCodeFence ? line : replaceWikilinksOutsideInlineCode(line);
+    })
+    .join("\n");
+}
+
+function replaceWikilinksOutsideInlineCode(line: string): string {
+  let output = "";
+  let index = 0;
+  let inInlineCode = false;
+
+  while (index < line.length) {
+    const char = line[index];
+    if (char === "`") {
+      inInlineCode = !inInlineCode;
+      output += char;
+      index += 1;
+      continue;
     }
 
-    const wikiLabel = match[1];
-    const strongLabel = match[2];
-
-    if (wikiLabel) {
-      const wikilink = parseWikilinkLabel(wikiLabel);
-      const target = resolveInlinePageTarget(wikilink, pageByTitle);
-      parts.push(
-        target ? (
-          <button
-            key={`wiki-${key}`}
-            className="wikilink"
-            type="button"
-            onClick={() => openPage(target.id)}
-          >
-            {wikilink.label}
-          </button>
-        ) : (
-          <span
-            key={`wiki-${key}`}
-            className={`wikilink ${wikilink.entityKind ? "wikilink--entity" : "wikilink--missing"}`}
-          >
-            {wikilink.label}
-          </span>
-        )
-      );
-      key += 1;
-    } else if (strongLabel) {
-      parts.push(<strong key={`strong-${key}`}>{strongLabel}</strong>);
-      key += 1;
+    if (!inInlineCode && line.startsWith("[[", index)) {
+      const end = line.indexOf("]]", index + 2);
+      if (end !== -1) {
+        const value = line.slice(index + 2, end);
+        const wikilink = parseWikilinkLabel(value);
+        output += `[${escapeMarkdownLabel(wikilink.label)}](wiki:${encodeURIComponent(value)})`;
+        index = end + 2;
+        continue;
+      }
     }
 
-    lastIndex = match.index + match[0].length;
+    output += char;
+    index += 1;
   }
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
+  return output;
+}
 
-  return parts;
+function escapeMarkdownLabel(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+}
+
+function safeDecodeUriComponent(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+function isExternalHref(href: string | undefined): boolean {
+  return Boolean(href && /^[a-z][a-z0-9+.-]*:/i.test(href));
 }
 
 function parseWikilinkLabel(value: string): {
@@ -1410,6 +1583,7 @@ function humanizeKind(kind: string): string {
 function getBreadcrumb({
   view,
   activePage,
+  activeEntityNode,
   graphNodes,
   graphFocusId,
   nodeById,
@@ -1418,6 +1592,7 @@ function getBreadcrumb({
 }: {
   view: ViewState;
   activePage: WikiPage | undefined;
+  activeEntityNode: GraphNode | undefined;
   graphNodes: GraphNode[];
   graphFocusId: string;
   nodeById: Map<string, GraphNode>;
@@ -1429,6 +1604,15 @@ function getBreadcrumb({
   if (view.mode === "home") return [home];
   if (view.mode === "graph") {
     return [home, { label: nodeById.get(graphFocusId)?.title ?? "graph" }];
+  }
+
+  if (view.mode === "entity") {
+    const graphAction = graphNodes.length > 0 ? () => openGraph(view.nodeId) : undefined;
+    return [
+      home,
+      { label: "graph", action: graphAction },
+      { label: activeEntityNode?.title ?? "entity" }
+    ];
   }
 
   const graphAction =
@@ -1444,8 +1628,40 @@ function metadataPageId(node: GraphNode): string | undefined {
   return typeof pageId === "string" ? pageId : undefined;
 }
 
+function metadataEntityId(node: GraphNode): string | undefined {
+  const entityId = node.metadata.entityId;
+  if (typeof entityId === "string") return entityId;
+  return node.id.startsWith("entity:") ? node.id.slice("entity:".length) : undefined;
+}
+
+function getEntityForNode(
+  node: GraphNode,
+  entityById: Map<string, WikiEntity>
+): WikiEntity | undefined {
+  const entityId = metadataEntityId(node);
+  return entityId ? entityById.get(entityId) : undefined;
+}
+
 function pageNodeId(pageId: string): string {
   return `page:${pageId}`;
+}
+
+function getPagesForEntity(
+  entityId: string | undefined,
+  pages: WikiPage[],
+  mentions: EntityMention[]
+): WikiPage[] {
+  if (!entityId) return [];
+
+  const pageById = new Map(pages.map((page) => [page.id, page]));
+  const pageIds = new Set(
+    mentions.filter((mention) => mention.entityId === entityId).map((mention) => mention.pageId)
+  );
+
+  return [...pageIds]
+    .map((id) => pageById.get(id))
+    .filter((page): page is WikiPage => Boolean(page))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function getRelatedPages(pageId: string, pages: WikiPage[], links: WikiLink[]): WikiPage[] {

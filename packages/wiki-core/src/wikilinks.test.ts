@@ -22,7 +22,7 @@ describe("wikilinks", () => {
     const memory = createPage({ kind: "topic", title: "Agent memory" }, now);
     const page = createPage(
       {
-        kind: "article",
+        kind: "note",
         title: "Note",
         body: "[[MCP]] links to [[AI memory]] and [[agent-memory]]."
       },
@@ -47,7 +47,7 @@ describe("wikilinks", () => {
 
   it("derives plain wikilink edges without self links", () => {
     const mcp = createPage({ kind: "topic", title: "MCP" }, now);
-    const page = createPage({ kind: "article", title: "Note", body: "[[MCP]] and [[Note]]" }, now);
+    const page = createPage({ kind: "note", title: "Note", body: "[[MCP]] and [[Note]]" }, now);
 
     const links = deriveWikilinkLinks(page, [mcp, page], [], now);
 

@@ -172,7 +172,7 @@ describe("server app", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          kind: "article",
+          kind: "note",
           title: "Graph note",
           body: "Connect [[person:Andre Karpathy]] and [[organization:OpenAI]]."
         })

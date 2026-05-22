@@ -44,7 +44,7 @@ The graph is heterogeneous. It is not page-only and not entity-only.
 
 Node kinds:
 
-- `page`: durable wiki artifacts such as notes, articles, plans, decisions, and sources.
+- `page`: durable wiki artifacts. Authored content uses `note`; plan/design/article are not separate page kinds.
 - `entity`: domain objects such as people, organizations, projects, concepts, protocols, or anything user-defined.
 - `agent`: provenance node for trusted writers.
 - `resource`: URL, file, upload, or source material.
@@ -55,7 +55,7 @@ Edge kinds:
 
 - `links_to`: page to page, from manual links or resolved wikilinks.
 - `mentions`: page to entity, derived from typed or plain wikilinks.
-- `represents`: page to entity when a page is the canonical article for an entity.
+- `represents`: page to entity when a page is the canonical page for an entity.
 - `created_by`: page to agent.
 - `sourced_from`: page to resource.
 - `co_mentioned_with`: entity to entity, derived from shared page mentions.

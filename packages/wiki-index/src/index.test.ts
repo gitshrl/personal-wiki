@@ -34,7 +34,7 @@ describe("wiki-index", () => {
   it("creates page chunks with embedding metadata", () => {
     const page = createPage(
       {
-        kind: "article",
+        kind: "note",
         title: "MCP note",
         summary: "MCP write path",
         body: "MCP should support durable notes."

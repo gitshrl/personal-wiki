@@ -25,6 +25,8 @@ The core pattern comes from Karpathy's LLM Wiki: do not re-discover knowledge fr
 - `09_initial_plan_complement.md`: complementary ideas from the initial plan and Karpathy inspiration.
 - `10_competitive_research_and_moat.md`: existing tools research and moat strategy.
 - `11_using_mcp_with_agents.md`: practical MCP setup and tool usage for agents.
+- `12_agent_mcp_setup_and_write_policy.md`: MCP setup, agent skill separation, write policy, and entity approval flow.
+- `13_install_and_e2e_setup.md`: local install, service startup, MCP wiring, skill install, and end-to-end smoke checks.
 
 ## Core Development Scope
 
@@ -89,7 +91,7 @@ Remaining this-phase work in this repository:
 - Initial embedding model is `text-embedding-3-small`.
 - OpenAI, embedding, and Qdrant settings live in `~/.personal-wiki/config.json`, not tracked source.
 - Runtime data lives under `~/.personal-wiki`.
-- Page kinds are data-driven and can grow by user/domain.
+- Page kinds stay coarse. Authored wiki pages use `note`; plan/design/article are title, tag, heading, or metadata distinctions, not separate page kinds.
 - Entity kinds are data-driven and can grow by user/domain.
 - Graph node kinds stay stable: `page`, `entity`, `agent`, and `resource`.
 - There is no dedicated `chat` graph node. A useful conversation can become a page, but raw conversation state is not a graph primitive.

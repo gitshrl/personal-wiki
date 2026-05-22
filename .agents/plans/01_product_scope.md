@@ -74,7 +74,7 @@ The mock includes sample kinds like `repo`, `lab`, `claim`, `source`, and `brain
 
 ## Kinds And Nodes
 
-Page kinds and entity kinds are user and domain defined. Graph node kinds stay small and stable: `page`, `entity`, `agent`, and `resource`. A conversation can create a note page, but there is no dedicated `chat` graph node.
+Page kinds stay coarse. Authored wiki pages use `note`; plan/design/article are title, tag, heading, or metadata distinctions. Entity kinds are user and domain defined. Graph node kinds stay small and stable: `page`, `entity`, `agent`, and `resource`. A conversation can create a note page, but there is no dedicated `chat` graph node.
 
 Examples:
 
@@ -140,7 +140,7 @@ Rules:
 2. Server creates a capture item.
 3. Agent extracts candidate pages and wikilinks.
 4. Agent proposes 5 to 15 page updates.
-5. Accepted updates become article pages and topic links.
+5. Accepted updates become note pages and topic links.
 
 ### Query The Graph
 

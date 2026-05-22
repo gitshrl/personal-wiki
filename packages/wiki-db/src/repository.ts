@@ -347,6 +347,7 @@ const linkOrigins = new Set<string>(["wikilink", "manual", "proposal", "system"]
 const entityLinkOrigins = new Set<string>(["co-mention", "manual", "page-title", "system"]);
 const proposalStatuses = new Set<string>(["pending", "accepted", "rejected", "applied"]);
 const indexJobStatuses = new Set<string>(["pending", "running", "done", "failed"]);
+const maxEntityMentionsPerPage = 5;
 
 export class WikiRepository {
   constructor(private readonly db: WikiDatabase) {}
@@ -1681,7 +1682,7 @@ export class WikiRepository {
     const titleEntity = this.upsertPageEntityIfApplicable(page, now);
 
     if (titleEntity) {
-      pushMention(mentions, seen, {
+      pushMentionWithinLimit(mentions, seen, {
         id: createEntityMentionId(page.id, titleEntity.id, page.title, -1),
         pageId: page.id,
         entityId: titleEntity.id,
@@ -1691,6 +1692,7 @@ export class WikiRepository {
     }
 
     for (const link of parseWikilinks(page.body)) {
+      if (mentions.length >= maxEntityMentionsPerPage) break;
       const target = parseEntityTarget(link.target);
       const resolvedPage = resolvePage(link.target) ?? resolvePage(target.title);
       const entity = this.upsertEntityFromPageOrTarget(
@@ -1699,7 +1701,7 @@ export class WikiRepository {
         target.title,
         now
       );
-      pushMention(mentions, seen, {
+      pushMentionWithinLimit(mentions, seen, {
         id: createEntityMentionId(page.id, entity.id, link.raw, link.index),
         pageId: page.id,
         entityId: entity.id,
@@ -1709,11 +1711,12 @@ export class WikiRepository {
     }
 
     for (const link of this.listLinks({ fromPageId: page.id, origin: "manual" })) {
+      if (mentions.length >= maxEntityMentionsPerPage) break;
       const linkedPage = this.getPage(link.toPageId);
       if (!linkedPage) continue;
       const entity = this.upsertPageEntityIfApplicable(linkedPage, now);
       if (!entity) continue;
-      pushMention(mentions, seen, {
+      pushMentionWithinLimit(mentions, seen, {
         id: createEntityMentionId(page.id, entity.id, link.sourceText ?? linkedPage.title, 0),
         pageId: page.id,
         entityId: entity.id,
@@ -2163,12 +2166,13 @@ function normalizePageForSave(page: WikiPage): WikiPage {
 }
 
 function rowToPage(row: PageRow): WikiPage {
-  assertPageKind(row.kind);
+  const kind = normalizePageKind(row.kind);
+  assertPageKind(kind);
   assertPageStatus(row.status);
 
   return {
     id: row.id,
-    kind: row.kind,
+    kind,
     title: row.title,
     slug: row.slug,
     body: row.body,
@@ -2684,9 +2688,14 @@ function compareGraphEdges(left: GraphEdge, right: GraphEdge): number {
   );
 }
 
-function pushMention(mentions: EntityMention[], seen: Set<string>, mention: EntityMention): void {
+function pushMentionWithinLimit(
+  mentions: EntityMention[],
+  seen: Set<string>,
+  mention: EntityMention
+): void {
   const key = `${mention.pageId}:${mention.entityId}:${mention.sourceText}`;
   if (seen.has(key)) return;
+  if (mentions.length >= maxEntityMentionsPerPage) return;
   seen.add(key);
   mentions.push(mention);
 }

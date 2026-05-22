@@ -11,6 +11,7 @@
     "dev:mcp": "pnpm --filter @personal-wiki/mcp dev",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
+    "install:skills": "node scripts/install-skills.mjs --dest ~/.claude/skills --dest ~/.agents/skills",
     "lint": "pnpm -r lint",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "typecheck": "pnpm -r typecheck"

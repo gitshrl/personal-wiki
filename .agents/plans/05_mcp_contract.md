@@ -198,7 +198,7 @@ Input:
 ```json
 {
   "query": "What do I know about MCP as agent memory?",
-  "kinds": ["topic", "article"],
+  "kinds": ["topic", "note"],
   "limit": 8,
   "include_graph_context": true
 }

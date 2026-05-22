@@ -60,13 +60,27 @@ describe("WikiRepository", () => {
     });
   });
 
+  it("normalizes authored page kind aliases to note", () => {
+    withRepository(({ repo }) => {
+      const plan = repo.createPage({ kind: "plan", title: "Roadmap" }, { now });
+      const design = repo.createPage({ kind: "design", title: "System shape" }, { now });
+      const article = repo.createPage({ kind: "article", title: "Write-up" }, { now });
+
+      expect([plan, design, article]).toEqual([
+        expect.objectContaining({ id: "note-roadmap", kind: "note" }),
+        expect.objectContaining({ id: "note-system-shape", kind: "note" }),
+        expect.objectContaining({ id: "note-write-up", kind: "note" })
+      ]);
+    });
+  });
+
   it("replaces derived wikilinks on page save and keeps manual links", () => {
     withRepository(({ repo }) => {
       const mcp = repo.createPage({ kind: "topic", title: "MCP" }, { now });
       const wiki = repo.createPage({ kind: "topic", title: "Personal wiki" }, { now });
       const note = repo.createPage(
         {
-          kind: "article",
+          kind: "note",
           title: "Session note",
           body: "Connect [[MCP]] and [[Personal wiki]]."
         },
@@ -120,7 +134,7 @@ describe("WikiRepository", () => {
 
       const note = repo.createPage(
         {
-          kind: "article",
+          kind: "note",
           title: "Alias note",
           body: "Remember [[AI memory]]."
         },
@@ -142,7 +156,7 @@ describe("WikiRepository", () => {
     withRepository(({ repo }) => {
       const note = repo.createPage(
         {
-          kind: "article",
+          kind: "note",
           title: "Entity note",
           body: "Connect [[protocol:MCP]] with [[organization:OpenAI]] and [[Personal wiki]]."
         },
@@ -200,6 +214,45 @@ describe("WikiRepository", () => {
         expect.not.arrayContaining([expect.objectContaining({ title: "OpenAI" })])
       );
       expect(nextGraph.links).toHaveLength(1);
+    });
+  });
+
+  it("caps entity mentions at five per page", () => {
+    withRepository(({ repo }) => {
+      const note = repo.createPage(
+        {
+          kind: "note",
+          title: "Dense note",
+          body: [
+            "[[topic:One]]",
+            "[[topic:Two]]",
+            "[[topic:Three]]",
+            "[[topic:Four]]",
+            "[[topic:Five]]",
+            "[[topic:Six]]",
+            "[[topic:Seven]]"
+          ].join(" ")
+        },
+        { now }
+      );
+
+      const graph = repo.getEntityGraph();
+      const knowledgeGraph = repo.getKnowledgeGraph();
+      const noteMentions = graph.mentions.filter((mention) => mention.pageId === note.id);
+      const mentionedEntityTitles = noteMentions.map(
+        (mention) => graph.entities.find((entity) => entity.id === mention.entityId)?.title
+      );
+
+      expect(noteMentions).toHaveLength(5);
+      expect(mentionedEntityTitles).toEqual(
+        expect.arrayContaining(["One", "Two", "Three", "Four", "Five"])
+      );
+      expect(graph.entities.map((entity) => entity.title)).not.toContain("Six");
+      expect(graph.entities.map((entity) => entity.title)).not.toContain("Seven");
+      expect(knowledgeGraph.edges.filter((edge) => edge.kind === "mentions")).toHaveLength(5);
+      expect(knowledgeGraph.edges.filter((edge) => edge.kind === "co_mentioned_with")).toHaveLength(
+        10
+      );
     });
   });
 
@@ -290,8 +343,8 @@ describe("WikiRepository", () => {
       const mcp = repo.createPage({ kind: "topic", title: "MCP" }, { now });
       const wiki = repo.createPage({ kind: "topic", title: "Personal wiki" }, { now });
       const memory = repo.createPage({ kind: "topic", title: "Agent memory" }, { now });
-      const note = repo.createPage({ kind: "article", title: "Note" }, { now });
-      const orphan = repo.createPage({ kind: "article", title: "Orphan" }, { now });
+      const note = repo.createPage({ kind: "note", title: "Note" }, { now });
+      const orphan = repo.createPage({ kind: "note", title: "Orphan" }, { now });
 
       repo.addLink({ fromPageId: note.id, toPageId: mcp.id, origin: "manual", createdAt: now });
       repo.addLink({ fromPageId: mcp.id, toPageId: wiki.id, origin: "manual", createdAt: now });
@@ -309,7 +362,7 @@ describe("WikiRepository", () => {
       expect(repo.findPaths(note.id, memory.id, { maxDepth: 3 })).toEqual([
         [note.id, mcp.id, wiki.id, memory.id]
       ]);
-      expect(repo.listOrphanPages("article").map((page) => page.id)).toEqual([orphan.id]);
+      expect(repo.listOrphanPages("note").map((page) => page.id)).toEqual([orphan.id]);
       expect(repo.findMissingLinks()).toEqual([
         expect.objectContaining({
           pageId: note.id,

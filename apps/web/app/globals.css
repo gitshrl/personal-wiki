@@ -860,10 +860,59 @@ a:hover {
 .prose p {
   margin: 0;
   padding-bottom: 18px;
+  white-space: pre-line;
 }
 
 .prose p:last-child {
   padding-bottom: 0;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0;
+  padding: 0 0 18px 24px;
+}
+
+.prose li {
+  margin: 0 0 6px;
+  padding-left: 2px;
+}
+
+.prose li:last-child {
+  margin-bottom: 0;
+}
+
+.prose code {
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.prose pre {
+  overflow-x: auto;
+  margin: 0 0 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.prose pre code {
+  display: block;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
+.prose hr {
+  margin: 18px 0 28px;
+  border: 0;
+  border-top: 1px solid var(--hairline);
 }
 
 .prose h2,
