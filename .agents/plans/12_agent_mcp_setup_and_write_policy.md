@@ -157,11 +157,60 @@ wait for user approval before direct writes or new entity creation
 
 Use `mode: "direct"` only after explicit approval.
 
+## Proactive Memory Check
+
+Agents should actively check whether a session produced durable wiki knowledge. They should not
+wait for the user to say "remember this" when the work clearly changed project memory.
+
+Create or append a proposal when the session produced:
+
+- a durable decision
+- a reusable fix pattern
+- an architecture or workflow constraint
+- a high-quality source summary
+- a changed agent, MCP, UI, or storage policy
+- a root cause future agents should know
+
+Before writing:
+
+1. Search existing pages.
+2. Prefer appending or updating an existing page.
+3. Use `mode: "propose"` by default.
+4. Use `kind: "note"` for authored pages.
+5. Use at most five meaningful wikilinks.
+6. Put new entities under `Suggested Entities`; do not create them directly.
+
+Direct writes are reserved for explicitly trusted local flows where the user has approved the write
+policy. Never direct-write new entity pages, taxonomy changes, merges, splits, or deletions.
+
 ## Page Shape
 
 A good agent-written page is concise and skimmable.
 
 Use `kind: "note"` for authored wiki pages. Planning notes, design notes, articles, and session summaries are all notes. Distinguish them with titles, tags, headings, and metadata instead of page kinds.
+
+Keep `summary` as a short subtitle: one sentence, 96 characters or fewer, no title repeat.
+
+Every agent-written page should satisfy this contract:
+
+- `kind` is `note` unless the page has a truly different lifecycle.
+- `summary` is present, one sentence, 96 characters or fewer, and does not repeat the title.
+- Source/session context lives in metadata, not in the body.
+- Use `sourceSessionId` for a real stable id; use `sourceSessionLabel` for a human-readable session label.
+- The body starts with the page title, then useful sections. Do not add boilerplate source lines.
+- No `Related`, `See also`, or link-dump section.
+- At most five meaningful wikilinks/entity mentions per page, inline where the idea is discussed.
+- Extra named things stay plain text unless they are one of the page's core relationships.
+
+Use wikilinks in the body as the visible relationship surface. Do not add a separate `Related`,
+`See also`, or link-dump section when the same relationship is already expressed by meaningful
+`[[wikilinks]]` in context.
+
+Wikilinks should be sparse and intentional:
+
+- Existing pages: `[[Exact Page Title]]`
+- Approved or clearly useful typed entities: `[[entity-kind:Entity Title]]`
+- At most five meaningful entity mentions per page
 
 Recommended structure:
 
@@ -202,7 +251,8 @@ Do not force every section. Use only the sections needed.
 Every write should include:
 
 - `agentId`
-- `sourceSessionId` when available
+- `sourceSessionId` when available; omit it when unknown instead of writing an empty string
+- `sourceSessionLabel` when there is useful human session/source context but no stable session id
 - `targetPages` when linking to known existing pages
 - `tags` when they help retrieval
 - `mode: "propose"` by default

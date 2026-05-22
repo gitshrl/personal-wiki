@@ -61,12 +61,16 @@ describe("wiki MCP tool actions", () => {
       const result = addWikiNote(context, {
         title: "Direct note",
         body: "Connect to [[Personal wiki]].",
+        summary: "Short direct note.",
         agentId: "codex",
+        sourceSessionLabel: "mcp test session",
         targetPages: ["Personal wiki"],
         mode: "direct"
       });
 
       expect(result.page?.id).toBe("note-direct-note");
+      expect(result.page?.summary).toBe("Short direct note.");
+      expect(result.page?.metadata.sourceSessionLabel).toBe("mcp test session");
       expect(result.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
       const graph = queryWikiGraph(context, { focusId: "Personal wiki" });

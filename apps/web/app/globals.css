@@ -780,8 +780,12 @@ a:hover {
 }
 
 .metadata dd {
+  max-width: 260px;
+  overflow: hidden;
   color: var(--text);
   font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .entity-section {
@@ -982,12 +986,15 @@ a:hover {
 
 .wikilink {
   display: inline;
+  border: 0;
   border-bottom: 1px dashed var(--accent-line);
+  background: transparent;
   padding: 0 0 1px;
   color: var(--accent);
   font: inherit;
   line-height: inherit;
   vertical-align: baseline;
+  cursor: pointer;
 }
 
 .wikilink:hover {
@@ -1047,6 +1054,14 @@ a:hover {
   color: var(--text-4);
   font-family: var(--mono);
   font-size: 11px;
+}
+
+.card-row small {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .graph-view {

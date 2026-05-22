@@ -50,9 +50,79 @@ Do not write:
 - secrets or secret-adjacent config
 - generic facts better found in public docs
 
+## Proactive Memory Check
+
+After any non-trivial task, decide whether the wiki should be updated. Do not wait for the user to
+say "remember this" when the work produced clearly durable knowledge.
+
+Create or append a proposal when the session produced:
+
+- a durable decision
+- a reusable fix pattern
+- an architecture or workflow constraint
+- a high-quality source summary
+- a changed agent, MCP, UI, or storage policy
+- a root cause future agents should know
+
+Before writing:
+
+1. Search existing pages.
+2. Prefer appending or updating an existing page.
+3. Use `mode: "propose"` by default.
+4. Use `kind: "note"` for authored pages.
+5. Use at most five meaningful wikilinks.
+6. Put new entities under `Suggested Entities`; do not create them directly.
+
+Use direct writes only for explicitly trusted local flows where the user has approved the write
+policy. Never direct-write new entity pages, taxonomy changes, merges, splits, or deletions.
+
+## Quality Bar
+
+A good page should be useful six months later without the chat around it.
+
+Before writing, decide the page's job in one sentence. If there is no clear job, do not create a
+page; update an existing page or leave the fact in chat.
+
+Write pages as durable notes, not articles:
+
+- Lead with the actual takeaway, decision, constraint, or lesson.
+- Keep `summary` as a short subtitle: one sentence, 96 characters or fewer, no title repeat.
+- Include source context when it changes how the page should be trusted.
+- Preserve the sharp technical detail: failure mode, tradeoff, boundary, invariant, or test rule.
+- Say what changed or what future agents should do differently.
+- Keep uncertainty explicit when the source was partial or provisional.
+- Prefer compact sections and bullets over narrative filler.
+- Delete generic background, repeated setup, and obvious explanations.
+
+The page is not high quality if it only summarizes a conversation, lists every named thing, or
+creates relationships that are not visible in the prose.
+
+## Page Contract
+
+Every agent-written page should satisfy this checklist:
+
+- `kind` is `note` unless the page has a truly different lifecycle.
+- `summary` is present, one sentence, 96 characters or fewer, and does not repeat the title.
+- Source/session context lives in metadata, not in the body.
+- Use `sourceSessionId` for a real stable id; use `sourceSessionLabel` for a human-readable session label.
+- The body starts with the page title, then useful sections. Do not add boilerplate source lines.
+- No `Related`, `See also`, or link-dump section.
+- At most five meaningful wikilinks/entity mentions per page, inline where the idea is discussed.
+- Extra named things stay plain text unless they are one of the page's core relationships.
+
 ## Page Shape
 
 Keep pages concise and skimmable. Use only the sections needed:
+
+Use wikilinks in the body as the visible relationship surface. Do not add a separate `Related`,
+`See also`, or link-dump section when the same relationship is already expressed by meaningful
+`[[wikilinks]]` in context.
+
+Write wikilinks only for durable, meaningful relationships:
+
+- Existing pages: `[[Exact Page Title]]`
+- Approved or clearly useful typed entities: `[[entity-kind:Entity Title]]`
+- At most five meaningful entity mentions per page
 
 ```md
 ## Context
@@ -85,7 +155,8 @@ Why this exists. Mention project, repo, source session, or date when useful.
 Every write should include:
 
 - `agentId`
-- `sourceSessionId` when available
+- `sourceSessionId` when available; omit it when unknown instead of writing an empty string
+- `sourceSessionLabel` when there is useful human session/source context but no stable session id
 - `targetPages` when linking to known existing pages
 - `tags` when useful for retrieval
 - `mode: "propose"` by default

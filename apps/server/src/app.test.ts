@@ -130,7 +130,9 @@ describe("server app", () => {
         body: JSON.stringify({
           title: "Direct note",
           body: "Connect this note to a topic.",
+          summary: "Short direct note.",
           agentId: "codex",
+          sourceSessionLabel: "local test session",
           targetPages: ["Personal wiki"],
           mode: "direct"
         })
@@ -139,10 +141,12 @@ describe("server app", () => {
       expect(response.status).toBe(201);
       const json = (await response.json()) as {
         mode: string;
-        page: { id: string };
+        page: { id: string; summary?: string; metadata: Record<string, unknown> };
         linkedPageIds: string[];
       };
       expect(json.mode).toBe("direct");
+      expect(json.page.summary).toBe("Short direct note.");
+      expect(json.page.metadata.sourceSessionLabel).toBe("local test session");
       expect(json.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
       const graph = await app.request(`/api/graph?focus=${json.page.id}`);

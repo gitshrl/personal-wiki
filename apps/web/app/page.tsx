@@ -100,7 +100,8 @@ type ViewState =
   | { mode: "home" }
   | { mode: "graph" }
   | { mode: "entry"; id: string }
-  | { mode: "entity"; nodeId: string };
+  | { mode: "entity"; nodeId: string }
+  | { mode: "node"; nodeId: string };
 
 type SearchItem = {
   id: string;
@@ -114,6 +115,8 @@ type BreadcrumbItem = {
   action?: () => void;
 };
 
+type InlineWikilinkTarget = { kind: "page"; id: string } | { kind: "graph"; nodeId: string };
+
 type OutlineItem = {
   id: string;
   level: 2 | 3;
@@ -121,6 +124,9 @@ type OutlineItem = {
 };
 
 const apiBase = process.env.NEXT_PUBLIC_PERSONAL_WIKI_API_URL ?? "/wiki-api";
+const pageSubtitleMaxLength = 96;
+const pageLedeMaxLength = 180;
+const metadataValueMaxLength = 36;
 
 export default function Home() {
   const [pages, setPages] = useState<WikiPage[]>([]);
@@ -152,6 +158,7 @@ export default function Home() {
   const connectionStatus = loading ? "" : error ? "offline" : "online";
   const activePage = view.mode === "entry" ? pageById.get(view.id) : undefined;
   const activeEntityNode = view.mode === "entity" ? nodeById.get(view.nodeId) : undefined;
+  const activeGraphNode = view.mode === "node" ? nodeById.get(view.nodeId) : undefined;
   const activeEntity = activeEntityNode
     ? getEntityForNode(activeEntityNode, entityById)
     : undefined;
@@ -250,7 +257,7 @@ export default function Home() {
       return;
     }
 
-    setView({ mode: "graph" });
+    setView({ mode: "node", nodeId: id });
     closeSearch();
   }
 
@@ -304,6 +311,7 @@ export default function Home() {
     view,
     activePage,
     activeEntityNode,
+    activeGraphNode,
     graphNodes,
     graphFocusId,
     nodeById,
@@ -472,10 +480,11 @@ export default function Home() {
           {view.mode === "entry" && activePage ? (
             <EntityPage
               page={activePage}
-              pages={pages}
               links={pageLinks}
               pageByTitle={pageByTitle}
+              graphNodes={graphNodes}
               openPage={openPage}
+              openGraphNode={openGraphNode}
               openGraph={openGraph}
             />
           ) : null}
@@ -486,6 +495,16 @@ export default function Home() {
               entity={activeEntity}
               pages={pages}
               mentions={graphMentions}
+              openPage={openPage}
+              openGraph={openGraph}
+            />
+          ) : null}
+
+          {view.mode === "node" && activeGraphNode ? (
+            <GraphNodeDetailView
+              node={activeGraphNode}
+              pages={pages}
+              edges={graphEdges}
               openPage={openPage}
               openGraph={openGraph}
             />
@@ -620,20 +639,21 @@ function HomeView({
 
 function EntityPage({
   page,
-  pages,
   links,
   pageByTitle,
+  graphNodes,
   openPage,
+  openGraphNode,
   openGraph
 }: {
   page: WikiPage;
-  pages: WikiPage[];
   links: WikiLink[];
   pageByTitle: Map<string, WikiPage>;
+  graphNodes: GraphNode[];
   openPage: (id: string) => void;
+  openGraphNode: (id: string) => void;
   openGraph: (focusId?: string) => void;
 }) {
-  const relatedPages = getRelatedPages(page.id, pages, links);
   const linkCount = links.filter(
     (link) => link.fromPageId === page.id || link.toPageId === page.id
   ).length;
@@ -697,7 +717,11 @@ function EntityPage({
             </button>
           </div>
           <h1>{page.title}</h1>
-          {page.summary ? <p className="entity-page__lede">{page.summary}</p> : null}
+          {page.summary ? (
+            <p className="entity-page__lede" title={page.summary}>
+              {truncateText(page.summary, pageLedeMaxLength)}
+            </p>
+          ) : null}
           {page.sourceUrl ? (
             <a className="entity-page__url" href={page.sourceUrl} target="_blank" rel="noreferrer">
               {page.sourceUrl}
@@ -720,7 +744,9 @@ function EntityPage({
               body={page.body}
               pageTitle={page.title}
               pageByTitle={pageByTitle}
+              graphNodes={graphNodes}
               openPage={openPage}
+              openGraphNode={openGraphNode}
             />
           </section>
         ) : (
@@ -728,31 +754,6 @@ function EntityPage({
             <p className="empty-copy">No body.</p>
           </section>
         )}
-
-        {relatedPages.length > 0 ? (
-          <section className="entity-section">
-            <div className="section-title">
-              <h2>related</h2>
-              <span>{relatedPages.length}</span>
-            </div>
-            <div className="card-list">
-              {relatedPages.map((relatedPage) => (
-                <button
-                  key={relatedPage.id}
-                  className="card-row"
-                  type="button"
-                  onClick={() => openPage(relatedPage.id)}
-                >
-                  <span>
-                    <strong>{relatedPage.title}</strong>
-                    <small>{relatedPage.sourceType ?? relatedPage.kind}</small>
-                  </span>
-                  <span>{formatDate(relatedPage.updatedAt)}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
       </div>
 
       {showOutline ? (
@@ -768,19 +769,28 @@ function EntityPage({
 }
 
 function MetadataRow({ page, linkCount }: { page: WikiPage; linkCount: number }) {
-  const items: Array<[string, string]> = [];
+  const items: Array<{ key: string; value: string; title?: string | undefined }> = [];
+  const sourceSession =
+    metadataText(page.metadata, "sourceSessionLabel") ??
+    metadataText(page.metadata, "sourceSessionId");
 
-  if (page.createdByAgentId) items.push(["agent", page.createdByAgentId]);
-  items.push(["updated", formatDate(page.updatedAt)]);
-  if (page.trust) items.push(["trust", page.trust]);
-  if (linkCount > 0) items.push(["links", String(linkCount)]);
+  if (page.createdByAgentId) items.push({ key: "agent", value: page.createdByAgentId });
+  if (sourceSession) {
+    items.push({
+      key: "session",
+      value: truncateMiddle(sourceSession, metadataValueMaxLength),
+      title: sourceSession
+    });
+  }
+  items.push({ key: "updated", value: formatDate(page.updatedAt) });
+  if (linkCount > 0) items.push({ key: "links", value: String(linkCount) });
 
   return (
     <dl className="metadata">
-      {items.map(([key, value]) => (
-        <div key={`${key}-${value}`}>
-          <dt>{key}</dt>
-          <dd>{value}</dd>
+      {items.map((item) => (
+        <div key={`${item.key}-${item.value}`}>
+          <dt>{item.key}</dt>
+          <dd title={item.title}>{item.value}</dd>
         </div>
       ))}
     </dl>
@@ -827,7 +837,11 @@ function EntityDetailView({
             </button>
           </div>
           <h1>{node.title}</h1>
-          {node.summary ? <p className="entity-page__lede">{node.summary}</p> : null}
+          {node.summary ? (
+            <p className="entity-page__lede" title={node.summary}>
+              {truncateText(node.summary, pageLedeMaxLength)}
+            </p>
+          ) : null}
           <dl className="metadata">
             <div>
               <dt>pages</dt>
@@ -852,7 +866,7 @@ function EntityDetailView({
                 >
                   <span>
                     <strong>{page.title}</strong>
-                    <small>{page.summary ?? page.kind}</small>
+                    <small title={page.summary ?? page.kind}>{pageSubtitle(page)}</small>
                   </span>
                   <span>{formatDate(page.updatedAt)}</span>
                 </button>
@@ -867,16 +881,104 @@ function EntityDetailView({
   );
 }
 
+function GraphNodeDetailView({
+  node,
+  pages,
+  edges,
+  openPage,
+  openGraph
+}: {
+  node: GraphNode;
+  pages: WikiPage[];
+  edges: GraphEdge[];
+  openPage: (id: string) => void;
+  openGraph: (focusId?: string) => void;
+}) {
+  const relatedPages = useMemo(
+    () => getPagesForGraphNode(node, pages, edges),
+    [edges, node, pages]
+  );
+  const title =
+    node.kind === "agent" ? "pages created" : node.kind === "resource" ? "sourced pages" : "pages";
+
+  return (
+    <article className="entity-page">
+      <div className="entity-page__content">
+        <header className="entity-page__header">
+          <div className="entity-page__topline">
+            <div className="entity-page__kind">
+              <KindDot kind={node.subtype ?? node.kind} />
+              <span>{node.subtype ?? node.kind}</span>
+            </div>
+            <button
+              className="entity-page__graph-action"
+              type="button"
+              onClick={() => openGraph(node.id)}
+              title="Open this node in the graph"
+              aria-label={`View ${node.title} in the graph`}
+            >
+              ✺
+            </button>
+          </div>
+          <h1>{node.title}</h1>
+          {node.summary ? (
+            <p className="entity-page__lede" title={node.summary}>
+              {truncateText(node.summary, pageLedeMaxLength)}
+            </p>
+          ) : null}
+          <dl className="metadata">
+            <div>
+              <dt>pages</dt>
+              <dd>{relatedPages.length}</dd>
+            </div>
+          </dl>
+        </header>
+
+        <section className="entity-section">
+          <div className="section-title">
+            <h2>{title}</h2>
+            <span>{relatedPages.length}</span>
+          </div>
+          {relatedPages.length > 0 ? (
+            <div className="card-list">
+              {relatedPages.map((page) => (
+                <button
+                  key={page.id}
+                  className="card-row"
+                  type="button"
+                  onClick={() => openPage(page.id)}
+                >
+                  <span>
+                    <strong>{page.title}</strong>
+                    <small title={page.summary ?? page.kind}>{pageSubtitle(page)}</small>
+                  </span>
+                  <span>{formatDate(page.updatedAt)}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-copy">No pages are linked to this node yet.</p>
+          )}
+        </section>
+      </div>
+    </article>
+  );
+}
+
 function WikiProse({
   body,
   pageTitle,
   pageByTitle,
-  openPage
+  graphNodes,
+  openPage,
+  openGraphNode
 }: {
   body: string;
   pageTitle: string;
   pageByTitle: Map<string, WikiPage>;
+  graphNodes: GraphNode[];
   openPage: (id: string) => void;
+  openGraphNode: (id: string) => void;
 }) {
   const markdown = useMemo(() => convertWikilinksToMarkdownLinks(body), [body]);
   const components = useMemo<Components>(
@@ -886,18 +988,33 @@ function WikiProse({
 
         if (wikiValue !== null) {
           const wikilink = parseWikilinkLabel(wikiValue);
-          const target = resolveInlinePageTarget(wikilink, pageByTitle);
+          const target = resolveInlineWikilinkTarget(wikilink, pageByTitle, graphNodes);
 
-          return target ? (
-            <button className="wikilink" type="button" onClick={() => openPage(target.id)}>
-              {wikilink.label}
-            </button>
-          ) : (
-            <span
-              className={`wikilink ${wikilink.entityKind ? "wikilink--entity" : "wikilink--missing"}`}
+          if (!target) {
+            return (
+              <span
+                className={`wikilink ${wikilink.entityKind ? "wikilink--entity" : "wikilink--missing"}`}
+              >
+                {wikilink.label}
+              </span>
+            );
+          }
+
+          return (
+            <button
+              className="wikilink"
+              type="button"
+              onClick={() => {
+                if (target.kind === "page") {
+                  openPage(target.id);
+                  return;
+                }
+
+                openGraphNode(target.nodeId);
+              }}
             >
               {wikilink.label}
-            </span>
+            </button>
           );
         }
 
@@ -933,7 +1050,7 @@ function WikiProse({
         return <h6 id={slugifyForAnchor(text)}>{headingLink(text)}</h6>;
       }
     }),
-    [openPage, pageByTitle, pageTitle]
+    [graphNodes, openGraphNode, openPage, pageByTitle, pageTitle]
   );
 
   return (
@@ -1177,6 +1294,18 @@ function typedWikilinkKind(target: string): string | undefined {
   return typedTarget?.[1]?.trim().toLowerCase();
 }
 
+function resolveInlineWikilinkTarget(
+  wikilink: { target: string; label: string; entityKind?: string },
+  pageByTitle: Map<string, WikiPage>,
+  graphNodes: GraphNode[]
+): InlineWikilinkTarget | undefined {
+  const page = resolveInlinePageTarget(wikilink, pageByTitle);
+  if (page) return { kind: "page", id: page.id };
+
+  const node = resolveInlineGraphNodeTarget(wikilink, graphNodes);
+  return node ? { kind: "graph", nodeId: node.id } : undefined;
+}
+
 function resolveInlinePageTarget(
   wikilink: { target: string; label: string; entityKind?: string },
   pageByTitle: Map<string, WikiPage>
@@ -1186,6 +1315,65 @@ function resolveInlinePageTarget(
     pageByTitle.get(displayWikilinkLabel(wikilink.target).toLowerCase()) ??
     pageByTitle.get(wikilink.label.toLowerCase())
   );
+}
+
+function resolveInlineGraphNodeTarget(
+  wikilink: { target: string; label: string; entityKind?: string },
+  graphNodes: GraphNode[]
+): GraphNode | undefined {
+  const labels = new Set(
+    [wikilink.target, displayWikilinkLabel(wikilink.target), wikilink.label].map(
+      normalizeComparableText
+    )
+  );
+  const matchingNodes = graphNodes.filter((node) => graphNodeMatchesLabel(node, labels));
+
+  const typedKind = wikilink.entityKind;
+  if (typedKind) {
+    return matchingNodes.find((node) => graphNodeMatchesKind(node, typedKind));
+  }
+
+  return (
+    matchingNodes.find((node) => node.kind === "page") ??
+    matchingNodes.find((node) => node.kind === "entity") ??
+    matchingNodes[0]
+  );
+}
+
+function graphNodeMatchesLabel(node: GraphNode, labels: Set<string>): boolean {
+  if (labels.has(normalizeComparableText(node.title))) return true;
+
+  const slug = node.metadata.slug;
+  if (typeof slug === "string" && labels.has(normalizeComparableText(slug))) return true;
+
+  const agentId = metadataAgentId(node);
+  if (agentId && labels.has(normalizeComparableText(agentId))) return true;
+
+  const url = metadataUrl(node);
+  return Boolean(url && labels.has(normalizeComparableText(url)));
+}
+
+function graphNodeMatchesKind(node: GraphNode, kind: string): boolean {
+  const normalizedKind = normalizeComparableText(kind);
+  if (normalizeComparableText(node.kind) === normalizedKind) return true;
+  if (node.subtype && normalizeComparableText(node.subtype) === normalizedKind) return true;
+
+  const entityKinds = node.metadata.entityKinds;
+  return Array.isArray(entityKinds)
+    ? entityKinds.some(
+        (entityKind) =>
+          typeof entityKind === "string" && normalizeComparableText(entityKind) === normalizedKind
+      )
+    : false;
+}
+
+function normalizeComparableText(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function GraphView({
@@ -1523,7 +1711,7 @@ function filterSearchItems(pages: WikiPage[], query: string, linkCount: number):
     id: page.id,
     kind: page.kind,
     title: page.title,
-    hint: page.summary ?? page.status
+    hint: page.summary ? truncateText(page.summary, pageSubtitleMaxLength) : page.status
   }));
 
   if (!normalized) return [...commands, ...pageItems].slice(0, 12);
@@ -1584,6 +1772,7 @@ function getBreadcrumb({
   view,
   activePage,
   activeEntityNode,
+  activeGraphNode,
   graphNodes,
   graphFocusId,
   nodeById,
@@ -1593,6 +1782,7 @@ function getBreadcrumb({
   view: ViewState;
   activePage: WikiPage | undefined;
   activeEntityNode: GraphNode | undefined;
+  activeGraphNode: GraphNode | undefined;
   graphNodes: GraphNode[];
   graphFocusId: string;
   nodeById: Map<string, GraphNode>;
@@ -1615,6 +1805,15 @@ function getBreadcrumb({
     ];
   }
 
+  if (view.mode === "node") {
+    const graphAction = graphNodes.length > 0 ? () => openGraph(view.nodeId) : undefined;
+    return [
+      home,
+      { label: "graph", action: graphAction },
+      { label: activeGraphNode?.title ?? "node" }
+    ];
+  }
+
   const graphAction =
     graphNodes.length > 0
       ? () => openGraph(activePage ? pageNodeId(activePage.id) : graphFocusId)
@@ -1632,6 +1831,23 @@ function metadataEntityId(node: GraphNode): string | undefined {
   const entityId = node.metadata.entityId;
   if (typeof entityId === "string") return entityId;
   return node.id.startsWith("entity:") ? node.id.slice("entity:".length) : undefined;
+}
+
+function metadataAgentId(node: GraphNode): string | undefined {
+  const agentId = node.metadata.agentId;
+  return typeof agentId === "string" ? agentId : undefined;
+}
+
+function metadataUrl(node: GraphNode): string | undefined {
+  const url = node.metadata.url;
+  return typeof url === "string" ? url : undefined;
+}
+
+function metadataText(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function getEntityForNode(
@@ -1664,21 +1880,58 @@ function getPagesForEntity(
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
-function getRelatedPages(pageId: string, pages: WikiPage[], links: WikiLink[]): WikiPage[] {
+function getPagesForGraphNode(node: GraphNode, pages: WikiPage[], edges: GraphEdge[]): WikiPage[] {
   const pageById = new Map(pages.map((page) => [page.id, page]));
-  const ids = new Set<string>();
-  for (const link of links) {
-    if (link.fromPageId === pageId) ids.add(link.toPageId);
-    if (link.toPageId === pageId) ids.add(link.fromPageId);
+  const pageIds = new Set<string>();
+
+  if (node.kind === "agent") {
+    const agentId = metadataAgentId(node) ?? node.title;
+    for (const page of pages) {
+      if (page.createdByAgentId === agentId) pageIds.add(page.id);
+    }
   }
-  return [...ids]
+
+  if (node.kind === "resource") {
+    const url = metadataUrl(node) ?? node.title;
+    for (const page of pages) {
+      if (page.sourceUrl === url) pageIds.add(page.id);
+    }
+  }
+
+  for (const edge of edges) {
+    if (edge.fromNodeId === node.id && edge.sourcePageId) pageIds.add(edge.sourcePageId);
+    if (edge.toNodeId === node.id && edge.sourcePageId) pageIds.add(edge.sourcePageId);
+  }
+
+  return [...pageIds]
     .map((id) => pageById.get(id))
     .filter((page): page is WikiPage => Boolean(page))
-    .sort((left, right) => left.title.localeCompare(right.title));
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function pageSubtitle(page: WikiPage): string {
+  return truncateText(page.summary ?? page.kind, pageSubtitleMaxLength);
 }
 
 function sizeForGraphNode(degree: number): number {
   return 18 + Math.min(24, degree * 2.4);
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (normalized.length <= maxLength) return normalized;
+  if (maxLength <= 3) return normalized.slice(0, maxLength);
+  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function truncateMiddle(value: string, maxLength: number): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (normalized.length <= maxLength) return normalized;
+  if (maxLength <= 3) return normalized.slice(0, maxLength);
+
+  const startLength = Math.ceil((maxLength - 3) * 0.65);
+  const endLength = maxLength - 3 - startLength;
+  return `${normalized.slice(0, startLength)}...${normalized.slice(-endLength)}`;
 }
 
 function formatDate(value: string): string {
