@@ -15,38 +15,52 @@ Use two separate layers:
 
 Do not rely on tool schemas alone. Tool schemas describe capability. The skill describes taste, approval boundaries, and anti-bloat rules.
 
+Wikilinks are authored in the page body. The MCP does not infer visible wikilinks from tags,
+metadata, `targetPages`, or `Suggested Entities`.
+
 ## New Agent Setup
 
 Give every agent both pieces.
 
 ### 1. MCP Config
 
-For local development, the MCP client should spawn the stdio server:
+For local development, the MCP client should spawn the stdio server with the same Node binary used
+to install/build the repo. This matters because `better-sqlite3` is a native dependency; launching
+through a different Node runtime can fail the MCP handshake with a native module ABI mismatch.
 
 ```json
 {
   "mcpServers": {
     "personal-wiki": {
-      "command": "pnpm",
-      "args": ["--dir", "/home/dev/code/lab/personal-wiki", "--filter", "@personal-wiki/mcp", "dev"]
+      "command": "/usr/local/node-v20.12.0-linux-x64/bin/node",
+      "args": [
+        "/home/dev/code/lab/personal-wiki/apps/mcp/node_modules/tsx/dist/cli.mjs",
+        "/home/dev/code/lab/personal-wiki/apps/mcp/src/index.ts"
+      ]
     }
   }
 }
 ```
 
-If the client supports `cwd`, this is equivalent:
+If the client supports `cwd`, add it as a convenience:
 
 ```json
 {
   "mcpServers": {
     "personal-wiki": {
-      "command": "pnpm",
-      "args": ["--filter", "@personal-wiki/mcp", "dev"],
+      "command": "/usr/local/node-v20.12.0-linux-x64/bin/node",
+      "args": [
+        "/home/dev/code/lab/personal-wiki/apps/mcp/node_modules/tsx/dist/cli.mjs",
+        "/home/dev/code/lab/personal-wiki/apps/mcp/src/index.ts"
+      ],
       "cwd": "/home/dev/code/lab/personal-wiki"
     }
   }
 }
 ```
+
+Avoid `pnpm --filter @personal-wiki/mcp dev` in persisted MCP client config unless the client is
+known to inherit the same Node runtime used during `pnpm install`.
 
 The MCP client owns this process. Do not start MCP as a separate HTTP service.
 
@@ -177,8 +191,9 @@ Before writing:
 2. Prefer appending or updating an existing page.
 3. Use `mode: "propose"` by default.
 4. Use `kind: "note"` for authored pages.
-5. Use at most five meaningful wikilinks.
-6. Put new entities under `Suggested Entities`; do not create them directly.
+5. Set `entityKind` when the page title is itself a project, product, service, application, workflow, protocol, or topic.
+6. Choose core relationships and write them as inline wikilinks when they should be clickable.
+7. Put uncertain new entities under `Suggested Entities`; do not create entity pages directly.
 
 Direct writes are reserved for explicitly trusted local flows where the user has approved the write
 policy. Never direct-write new entity pages, taxonomy changes, merges, splits, or deletions.
@@ -198,8 +213,10 @@ Every agent-written page should satisfy this contract:
 - Source context lives in metadata or tags, not in boilerplate body lines.
 - The body starts with the page title, then useful sections. Do not add boilerplate source lines.
 - No `Related`, `See also`, or link-dump section.
+- If the page has durable relationships, the body includes one to five inline wikilinks.
 - At most five meaningful wikilinks/entity mentions per page, inline where the idea is discussed.
 - Extra named things stay plain text unless they are one of the page's core relationships.
+- Do not add placeholder wikilinks to pages that do not exist yet, such as `[[Project Architecture]]`, unless the current page actually discusses that concept as a core relationship.
 
 Use wikilinks in the body as the visible relationship surface. Do not add a separate `Related`,
 `See also`, or link-dump section when the same relationship is already expressed by meaningful
@@ -208,8 +225,19 @@ Use wikilinks in the body as the visible relationship surface. Do not add a sepa
 Wikilinks should be sparse and intentional:
 
 - Existing pages: `[[Exact Page Title]]`
-- Approved or clearly useful typed entities: `[[entity-kind:Entity Title]]`
+- Core typed entity mentions: `[[entity-kind:Entity Title]]`
 - At most five meaningful entity mentions per page
+
+When the page title names the main thing, use `entityKind` on the write instead of linking the title
+to itself. This makes the page a page-backed graph entity. Because that title entity counts against
+the five-mention cap, use at most four body wikilinks on those pages.
+
+Do not rely on `targetPages` to render wikilinks. `targetPages` creates manual graph links for known
+existing pages; it does not rewrite the body.
+
+Do not rely on `Suggested Entities` to create clickable prose. If a new entity is central enough to
+suggest, the first meaningful body mention should usually be a typed wikilink. The suggestion records
+whether the entity should later become canonical, merged, renamed, or promoted to a page.
 
 Recommended structure:
 
@@ -250,7 +278,8 @@ Do not force every section. Use only the sections needed.
 Every write should include:
 
 - `agentId`
-- `targetPages` when linking to known existing pages
+- `entityKind` when the title is the primary project, product, service, application, workflow, protocol, or topic
+- `targetPages` when linking to known existing pages, as metadata in addition to body wikilinks
 - `tags` when they help retrieval
 - `mode: "propose"` by default
 
@@ -261,9 +290,25 @@ Example:
   "title": "Agent MCP write policy",
   "body": "Decision: agents using [[Personal wiki]] should default to proposal mode and require approval before creating new entity pages.",
   "kind": "note",
+  "entityKind": "workflow",
   "agentId": "codex",
   "targetPages": ["Personal wiki", "MCP"],
   "tags": ["agent-workflow", "mcp", "write-policy"],
+  "mode": "propose"
+}
+```
+
+Project or codebase overview example:
+
+```json
+{
+  "title": "Adlina — Personal Finance Advisory Platform",
+  "kind": "note",
+  "entityKind": "project",
+  "summary": "KYC-driven finance advisory app with Excel scoring, backend, and backoffice.",
+  "body": "Adlina users complete a [[workflow:KYC Questionnaire|KYC questionnaire]]. The [[service:Adlina Backend|backend]] calls the [[service:Adlina Excel Service|Excel service]], while admins use [[application:Adlina Backoffice|the backoffice]].",
+  "agentId": "claude-code",
+  "tags": ["adlina", "architecture", "codebase"],
   "mode": "propose"
 }
 ```
@@ -277,9 +322,11 @@ Rules:
 - Each page should have at most five meaningful entity mentions.
 - Do not create entity pages just because an entity is mentioned.
 - Link existing pages when the match is exact or clearly intended.
-- Suggest new entities only. User approval is required before creating or canonicalizing them.
+- Typed wikilinks may create lightweight graph entity mentions. Use them only for the page's core relationships.
+- User approval is required before creating entity pages, adding new taxonomies, or canonicalizing entities.
 - Create entities only when they are durable: recurring, decision-relevant, project-relevant, or useful for future retrieval.
 - Ignore incidental names, throwaway tools, one-off URLs, package names, vague concepts, and secret-adjacent config unless they become important.
+- File names, repo folder names, frameworks, ports, packages, and one-off scripts usually stay plain text.
 
 The five mentions should be the concepts the page is really about, not every proper noun, tool, package, URL, company, or benchmark named in passing.
 

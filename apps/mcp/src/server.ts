@@ -203,6 +203,7 @@ export function createPersonalWikiMcpServer(options: CreatePersonalWikiMcpServer
         body: z.string().min(1),
         kind: z.string().min(1).optional(),
         summary: z.string().trim().max(96).optional(),
+        entityKind: z.string().trim().min(1).optional(),
         agentId: z.string().min(1),
         targetPages: z.array(z.string().min(1)).optional(),
         tags: z.array(z.string().min(1)).optional(),

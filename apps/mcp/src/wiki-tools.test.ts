@@ -62,6 +62,7 @@ describe("wiki MCP tool actions", () => {
         title: "Direct note",
         body: "Connect to [[Personal wiki]].",
         summary: "Short direct note.",
+        entityKind: "project",
         agentId: "codex",
         targetPages: ["Personal wiki"],
         mode: "direct"
@@ -69,12 +70,17 @@ describe("wiki MCP tool actions", () => {
 
       expect(result.page?.id).toBe("note-direct-note");
       expect(result.page?.summary).toBe("Short direct note.");
+      expect(result.page?.metadata.entityKind).toBe("project");
       expect(result.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
       const graph = queryWikiGraph(context, { focusId: "Personal wiki" });
       expect(graph.nodes.map((node) => node.id)).toContain("page:topic-personal-wiki");
       expect(graph.nodes.map((node) => node.id)).toContain("page:note-direct-note");
+      expect(
+        graph.nodes.find((node) => node.id === "page:note-direct-note")?.metadata.entityKinds
+      ).toEqual(["project"]);
       expect(graph.entities.map((entity) => entity.title)).toContain("Personal wiki");
+      expect(graph.entities.map((entity) => entity.title)).toContain("Direct note");
       expect(graph.pages.map((page) => page.id)).toContain("topic-personal-wiki");
       expect(graph.pages.map((page) => page.id)).toContain("note-direct-note");
 

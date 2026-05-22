@@ -534,9 +534,10 @@ function TreeItem({
   active: boolean;
   onClick: () => void;
 }) {
+  const kind = pageDisplayKind(page);
   return (
     <button className={`tree__item ${active ? "is-active" : ""}`} type="button" onClick={onClick}>
-      <KindDot kind={page.kind} />
+      <KindDot kind={kind} />
       <span>{page.title}</span>
     </button>
   );
@@ -619,10 +620,10 @@ function HomeView({
                 onClick={() => openPage(page.id)}
               >
                 <span className="recent-row__page">
-                  <KindDot kind={page.kind} />
+                  <KindDot kind={pageDisplayKind(page)} />
                   <span>
                     <strong>{page.title}</strong>
-                    <small>{page.kind}</small>
+                    <small>{pageDisplayKind(page)}</small>
                   </span>
                 </span>
                 <span className="recent-row__agent">{page.createdByAgentId ?? "manual"}</span>
@@ -653,6 +654,7 @@ function EntityPage({
   openGraphNode: (id: string) => void;
   openGraph: (focusId?: string) => void;
 }) {
+  const kind = pageDisplayKind(page);
   const linkCount = links.filter(
     (link) => link.fromPageId === page.id || link.toPageId === page.id
   ).length;
@@ -699,11 +701,8 @@ function EntityPage({
         <header className="entity-page__header">
           <div className="entity-page__topline">
             <div className="entity-page__kind">
-              <KindDot kind={page.kind} />
-              <span>
-                {page.kind}
-                {page.sourceType ? ` - ${page.sourceType}` : ""}
-              </span>
+              <KindDot kind={kind} />
+              <span>{kind}</span>
             </div>
             <button
               className="entity-page__graph-action"
@@ -770,6 +769,7 @@ function EntityPage({
 function MetadataRow({ page, linkCount }: { page: WikiPage; linkCount: number }) {
   const items: Array<{ key: string; value: string; title?: string | undefined }> = [];
 
+  items.push({ key: "kind", value: pageDisplayKind(page) });
   if (page.createdByAgentId) items.push({ key: "agent", value: page.createdByAgentId });
   items.push({ key: "updated", value: formatDate(page.updatedAt) });
   if (linkCount > 0) items.push({ key: "links", value: String(linkCount) });
@@ -1698,7 +1698,7 @@ function filterSearchItems(pages: WikiPage[], query: string, linkCount: number):
   }
   const pageItems = pages.map((page) => ({
     id: page.id,
-    kind: page.kind,
+    kind: pageDisplayKind(page),
     title: page.title,
     hint: page.summary ? truncateText(page.summary, pageSubtitleMaxLength) : page.status
   }));
@@ -1730,7 +1730,7 @@ function colorForKind(kind: string): string {
 function matchesFilter(page: WikiPage, filter: string): boolean {
   const normalized = filter.trim().toLowerCase();
   if (!normalized) return true;
-  return `${page.title} ${page.summary ?? ""} ${page.status} ${page.kind}`
+  return `${page.title} ${page.summary ?? ""} ${page.status} ${page.kind} ${pageDisplayKind(page)}`
     .toLowerCase()
     .includes(normalized);
 }
@@ -1738,9 +1738,10 @@ function matchesFilter(page: WikiPage, filter: string): boolean {
 function groupPagesByKind(pages: WikiPage[]) {
   const groups = new Map<string, WikiPage[]>();
   for (const page of pages) {
-    const existing = groups.get(page.kind) ?? [];
+    const kind = pageDisplayKind(page);
+    const existing = groups.get(kind) ?? [];
     existing.push(page);
-    groups.set(page.kind, existing);
+    groups.set(kind, existing);
   }
 
   return [...groups.entries()]
@@ -1755,6 +1756,10 @@ function groupPagesByKind(pages: WikiPage[]) {
 function humanizeKind(kind: string): string {
   const label = kind.replace(/[-_]+/g, " ");
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function pageDisplayKind(page: WikiPage): string {
+  return metadataString(page.metadata, "entityKind") ?? page.kind;
 }
 
 function getBreadcrumb({
@@ -1830,6 +1835,13 @@ function metadataAgentId(node: GraphNode): string | undefined {
 function metadataUrl(node: GraphNode): string | undefined {
   const url = node.metadata.url;
   return typeof url === "string" ? url : undefined;
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function getEntityForNode(

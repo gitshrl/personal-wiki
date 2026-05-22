@@ -84,6 +84,7 @@ const noteSchema = z.object({
   body: z.string().trim().min(1),
   kind: pageKindSchema.optional(),
   summary: z.string().trim().max(96).optional(),
+  entityKind: z.string().trim().min(1).optional(),
   agentId: z.string().trim().min(1),
   targetPages: z.array(z.string().trim().min(1)).optional(),
   tags: z.array(z.string().trim().min(1)).optional(),

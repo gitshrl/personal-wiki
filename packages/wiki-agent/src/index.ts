@@ -7,6 +7,7 @@ export interface AddNoteInput {
   body: string;
   kind?: PageKind | undefined;
   summary?: string | undefined;
+  entityKind?: string | undefined;
   agentId: string;
   targetPages?: string[] | undefined;
   tags?: string[] | undefined;
@@ -20,6 +21,7 @@ export interface ProposalChange {
   pageId?: string | undefined;
   summary?: string | undefined;
   body?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
   targetPages?: string[] | undefined;
 }
 
@@ -34,6 +36,7 @@ interface NormalizedAddNoteInput {
   body: string;
   kind: PageKind;
   summary?: string | undefined;
+  entityKind?: string | undefined;
   agentId: string;
   targetPages: string[];
   tags: string[];
@@ -52,6 +55,7 @@ export function buildAddNoteProposal(input: AddNoteInput): WikiProposalPayload {
         pageTitle: normalized.title,
         summary: normalized.summary,
         body: normalized.body,
+        metadata: noteMetadata(normalized),
         targetPages: normalized.targetPages
       }
     ]
@@ -78,10 +82,12 @@ export function normalizeAddNoteInput(input: AddNoteInput): NormalizedAddNoteInp
   const title = input.title.trim();
   const body = input.body.trim();
   const summary = input.summary?.trim();
+  const entityKind = input.entityKind?.trim();
   const agentId = input.agentId.trim();
   if (!title) throw new Error("title is required");
   if (!body) throw new Error("body is required");
   if (summary && summary.length > 96) throw new Error("summary must be 96 characters or fewer");
+  if (input.entityKind !== undefined && !entityKind) throw new Error("entityKind cannot be empty");
   if (!agentId) throw new Error("agentId is required");
 
   return {
@@ -89,6 +95,7 @@ export function normalizeAddNoteInput(input: AddNoteInput): NormalizedAddNoteInp
     body,
     kind: normalizePageKind(input.kind ?? "note"),
     summary: summary || undefined,
+    entityKind: entityKind || undefined,
     agentId,
     targetPages: input.targetPages?.map((targetPage) => targetPage.trim()).filter(Boolean) ?? [],
     tags: input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [],
@@ -98,6 +105,7 @@ export function normalizeAddNoteInput(input: AddNoteInput): NormalizedAddNoteInp
 
 function noteMetadata(input: NormalizedAddNoteInput): Record<string, unknown> {
   return {
+    ...(input.entityKind ? { entityKind: input.entityKind } : {}),
     ...(input.targetPages.length > 0 ? { targetPages: input.targetPages } : {}),
     ...(input.tags.length > 0 ? { tags: input.tags } : {})
   };

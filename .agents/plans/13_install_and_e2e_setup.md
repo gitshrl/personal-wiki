@@ -204,14 +204,19 @@ cmp -s skills/personal-wiki/SKILL.md ~/.agents/skills/personal-wiki/SKILL.md
 
 ## MCP Client Config
 
-Use this for MCP clients that accept `command` and `args`:
+Use this for MCP clients that accept `command` and `args`. Pin the Node binary that ran
+`pnpm install`; the MCP server loads `better-sqlite3`, so using a different Node ABI can crash the
+stdio server during `initialize`.
 
 ```json
 {
   "mcpServers": {
     "personal-wiki": {
-      "command": "pnpm",
-      "args": ["--dir", "/home/dev/code/lab/personal-wiki", "--filter", "@personal-wiki/mcp", "dev"]
+      "command": "/usr/local/node-v20.12.0-linux-x64/bin/node",
+      "args": [
+        "/home/dev/code/lab/personal-wiki/apps/mcp/node_modules/tsx/dist/cli.mjs",
+        "/home/dev/code/lab/personal-wiki/apps/mcp/src/index.ts"
+      ]
     }
   }
 }
@@ -223,8 +228,11 @@ If the client supports `cwd`:
 {
   "mcpServers": {
     "personal-wiki": {
-      "command": "pnpm",
-      "args": ["--filter", "@personal-wiki/mcp", "dev"],
+      "command": "/usr/local/node-v20.12.0-linux-x64/bin/node",
+      "args": [
+        "/home/dev/code/lab/personal-wiki/apps/mcp/node_modules/tsx/dist/cli.mjs",
+        "/home/dev/code/lab/personal-wiki/apps/mcp/src/index.ts"
+      ],
       "cwd": "/home/dev/code/lab/personal-wiki"
     }
   }
@@ -232,6 +240,8 @@ If the client supports `cwd`:
 ```
 
 If the checkout path changes, update the path before installing the client config.
+Avoid `pnpm --filter @personal-wiki/mcp dev` in persisted MCP config unless the client is known to
+inherit the same Node runtime used during install.
 
 ## MCP Smoke Checks
 
@@ -372,3 +382,14 @@ ps -eo pid,ppid,command | rg 'personal-wiki|@personal-wiki/mcp|tsx.*apps/mcp'
 ```
 
 The MCP process should normally be owned by the MCP client. Avoid starting duplicate standalone MCP processes.
+
+Node ABI mismatch:
+
+```txt
+node -p "process.versions.modules"
+claude mcp get personal-wiki
+codex mcp list
+```
+
+If the MCP config launches `pnpm` and the client runs under a different Node runtime, replace the
+config with an absolute Node command that matches the Node used for `pnpm install`.

@@ -109,32 +109,43 @@ For this project, npm is the best first publishing target because MCP clients al
 
 ## MCP Client Config
 
-Use this for MCP clients that accept `command` and `args`.
+Use this for MCP clients that accept `command` and `args`. Pin the Node binary that ran
+`pnpm install`; the MCP server loads `better-sqlite3`, so using a different Node ABI can crash the
+stdio server during `initialize`.
 
 ```json
 {
   "mcpServers": {
     "personal-wiki": {
-      "command": "pnpm",
-      "args": ["--dir", "/home/dev/code/lab/personal-wiki", "--filter", "@personal-wiki/mcp", "dev"]
+      "command": "/usr/local/node-v20.12.0-linux-x64/bin/node",
+      "args": [
+        "/home/dev/code/lab/personal-wiki/apps/mcp/node_modules/tsx/dist/cli.mjs",
+        "/home/dev/code/lab/personal-wiki/apps/mcp/src/index.ts"
+      ]
     }
   }
 }
 ```
 
-If the client supports `cwd`, this also works:
+If the client supports `cwd`, add it as a convenience:
 
 ```json
 {
   "mcpServers": {
     "personal-wiki": {
-      "command": "pnpm",
-      "args": ["--filter", "@personal-wiki/mcp", "dev"],
+      "command": "/usr/local/node-v20.12.0-linux-x64/bin/node",
+      "args": [
+        "/home/dev/code/lab/personal-wiki/apps/mcp/node_modules/tsx/dist/cli.mjs",
+        "/home/dev/code/lab/personal-wiki/apps/mcp/src/index.ts"
+      ],
       "cwd": "/home/dev/code/lab/personal-wiki"
     }
   }
 }
 ```
+
+Avoid `pnpm --filter @personal-wiki/mcp dev` in persisted MCP config unless the client is known to
+inherit the same Node runtime used during install.
 
 The MCP client should spawn this process. Do not run it as a separate HTTP server.
 

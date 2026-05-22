@@ -131,6 +131,7 @@ describe("server app", () => {
           title: "Direct note",
           body: "Connect this note to a topic.",
           summary: "Short direct note.",
+          entityKind: "project",
           agentId: "codex",
           targetPages: ["Personal wiki"],
           mode: "direct"
@@ -145,12 +146,13 @@ describe("server app", () => {
       };
       expect(json.mode).toBe("direct");
       expect(json.page.summary).toBe("Short direct note.");
+      expect(json.page.metadata.entityKind).toBe("project");
       expect(json.linkedPageIds).toEqual(["topic-personal-wiki"]);
 
       const graph = await app.request(`/api/graph?focus=${json.page.id}`);
       expect(graph.status).toBe(200);
       const graphJson = (await graph.json()) as {
-        nodes: Array<{ id: string; kind: string; title: string }>;
+        nodes: Array<{ id: string; kind: string; title: string; metadata: Record<string, unknown> }>;
         pages: Array<{ id: string }>;
       };
       expect(graphJson.nodes).toEqual(
@@ -161,6 +163,9 @@ describe("server app", () => {
       );
       expect(graphJson.pages.map((page) => page.id)).toContain("topic-personal-wiki");
       expect(graphJson.pages.map((page) => page.id)).toContain(json.page.id);
+      expect(
+        graphJson.nodes.find((node) => node.id === `page:${json.page.id}`)?.metadata.entityKinds
+      ).toEqual(["project"]);
     } finally {
       close();
     }

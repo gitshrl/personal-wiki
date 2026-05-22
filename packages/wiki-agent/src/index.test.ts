@@ -7,6 +7,7 @@ describe("wiki-agent", () => {
       title: "MCP write path",
       body: "MCP writes durable [[Personal wiki]] notes.",
       agentId: "agent-codex",
+      entityKind: "workflow",
       targetPages: ["Personal wiki"]
     });
 
@@ -14,6 +15,7 @@ describe("wiki-agent", () => {
       op: "create_page",
       kind: "note",
       pageTitle: "MCP write path",
+      metadata: { entityKind: "workflow", targetPages: ["Personal wiki"] },
       targetPages: ["Personal wiki"]
     });
   });
@@ -42,6 +44,7 @@ describe("wiki-agent", () => {
         title: "Session note",
         body: "MCP writes durable notes.",
         summary: "Short durable subtitle.",
+        entityKind: " project ",
         agentId: "agent-codex",
         targetPages: [" Personal wiki "],
         tags: [" mcp "]
@@ -51,9 +54,21 @@ describe("wiki-agent", () => {
 
     expect(page.summary).toBe("Short durable subtitle.");
     expect(page.metadata).toEqual({
+      entityKind: "project",
       targetPages: ["Personal wiki"],
       tags: ["mcp"]
     });
+  });
+
+  it("rejects empty entity kinds", () => {
+    expect(() =>
+      noteInputToPage({
+        title: "Empty entity kind",
+        body: "MCP writes durable notes.",
+        entityKind: " ",
+        agentId: "agent-codex"
+      })
+    ).toThrow("entityKind cannot be empty");
   });
 
   it("rejects long subtitles", () => {
