@@ -1,6 +1,5 @@
 node_modules
 .next
-docs/design/persona-wiki
 dist
 build
 coverage

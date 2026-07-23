@@ -5,7 +5,6 @@ Personal Wiki: an agent-maintained wiki and knowledge graph exposed over MCP. St
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system shape, seams, invariants
 - [CONTEXT.md](CONTEXT.md) — domain language
 - [docs/adr/](docs/adr/) — decisions and their rationale
-- [docs/design/persona-wiki/](docs/design/persona-wiki/) — the UI design source
 - [skills/personal-wiki/SKILL.md](skills/personal-wiki/SKILL.md) — the wiki write policy agents follow
 - [README.md](README.md) — install, service startup, MCP wiring
 
