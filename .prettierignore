@@ -1,6 +1,6 @@
 node_modules
 .next
-.agents/design/persona-wiki
+docs/design/persona-wiki
 dist
 build
 coverage
